@@ -64,11 +64,20 @@ internal sealed class MainWindow : Window
             Spacing = 16
         };
 
-        stack.Children.Add(CreateCard(
+        var overviewCard = CreateCard(
             CreateTextBlock("Controls", 24, heading, FontWeight.SemiBold),
             CreateTextBlock("The left canvas now uses FormattedText via the normal Avalonia formatter.", 13, muted),
             CreateTextBlock("The controls below use standard control text and rich TextBlock inlines.", 13, muted),
-            CreateRichTextPreview(muted, heading, accent)));
+            CreateRichTextPreview(muted, heading, accent));
+        overviewCard.Effect = new DropShadowEffect
+        {
+            OffsetX = 0,
+            OffsetY = 10,
+            BlurRadius = 14,
+            Color = Color.FromArgb(72, 14, 116, 144),
+            Opacity = 1
+        };
+        stack.Children.Add(overviewCard);
 
         stack.Children.Add(CreateCard(
             CreateTextBlock("Buttons and toggles", 17, heading, FontWeight.SemiBold),
@@ -210,6 +219,12 @@ internal sealed class MainWindow : Window
             Background = new SolidColorBrush(Color.Parse("#F7FAFD")),
             BorderBrush = new SolidColorBrush(Color.Parse("#D9E4EE")),
             BorderThickness = new Thickness(1),
+            BoxShadow = new BoxShadows(new BoxShadow
+            {
+                OffsetY = 10,
+                Blur = 16,
+                Color = Color.FromArgb(36, 23, 50, 77)
+            }),
             Child = stack
         };
     }
