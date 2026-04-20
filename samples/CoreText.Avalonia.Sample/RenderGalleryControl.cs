@@ -1,17 +1,27 @@
-using System.Globalization;
 using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 
 namespace CoreText.Avalonia.Sample;
 
+internal enum RenderGalleryScene
+{
+    BrushesAndImages,
+    GeometryAndMasks,
+    EffectsAndComposition,
+    TextFormatting
+}
+
 internal sealed class RenderGalleryControl : Control
 {
     private readonly WriteableBitmap _sampleBitmap;
+    private readonly RenderGalleryScene _scene;
 
-    public RenderGalleryControl(WriteableBitmap sampleBitmap)
+    public RenderGalleryControl(WriteableBitmap sampleBitmap, RenderGalleryScene scene)
     {
         _sampleBitmap = sampleBitmap;
+        _scene = scene;
+        ClipToBounds = true;
     }
 
     public override void Render(DrawingContext context)
@@ -23,129 +33,51 @@ internal sealed class RenderGalleryControl : Control
             return;
         }
 
-        var background = new SolidColorBrush(Color.Parse("#F3F7FA"));
-        var panelStroke = new Pen(new SolidColorBrush(Color.Parse("#D8E1E8")), 1);
+        var surfaceFill = new SolidColorBrush(Color.Parse("#EEF5F9"));
+        var cardFill = Brushes.White;
+        var panelStroke = new Pen(new SolidColorBrush(Color.Parse("#D9E4EE")), 1);
         var headingBrush = new SolidColorBrush(Color.Parse("#17324D"));
         var bodyBrush = new SolidColorBrush(Color.Parse("#5B7083"));
         var accentBrush = new SolidColorBrush(Color.Parse("#0E7490"));
         var warmBrush = new SolidColorBrush(Color.Parse("#F6C85F"));
-        var whiteBrush = Brushes.White;
 
         var bounds = new Rect(Bounds.Size);
-        var canvas = bounds.Deflate(24);
-        var inner = canvas.Deflate(20);
+        var surface = bounds.Deflate(1);
+        context.FillRectangle(surfaceFill, bounds);
+        context.DrawRectangle(cardFill, panelStroke, surface, 18);
 
-        context.FillRectangle(background, bounds);
-        context.DrawRectangle(whiteBrush, panelStroke, canvas, 18);
-
-        DrawFormattedText(context, inner.Position, "FormattedText preview", 28, headingBrush, FontWeight.SemiBold);
-        DrawFormattedText(context, new Point(inner.X, inner.Y + 44), "This canvas renders text through the normal Avalonia formatter.", 15, bodyBrush);
-        DrawFormattedText(context, new Point(inner.X, inner.Y + 66), "It now exercises FormattedText instead of the glyph-run-only sample path.", 15, bodyBrush);
-
-        var swatchTop = inner.Y + 122;
-        var lightRect = new Rect(inner.X, swatchTop, Math.Min(210, inner.Width * 0.30), 118);
-        var darkRect = new Rect(lightRect.Right + 36, swatchTop, Math.Min(260, inner.Width * 0.38), 138);
-        var ellipseSize = Math.Min(180, inner.Width * 0.24);
-        var ellipseRect = new Rect(inner.X, swatchTop + 168, ellipseSize, ellipseSize);
-        var bitmapRect = new Rect(darkRect.X, swatchTop + 182, Math.Min(300, inner.Width - darkRect.X + inner.X), 176);
-        var boxShadowRect = new Rect(inner.X, bitmapRect.Bottom + 18, 220, 66);
-
-        DrawLabel(context, new Point(lightRect.X, lightRect.Y - 24), "Solid fill", accentBrush);
-        context.FillRectangle(new SolidColorBrush(Color.Parse("#D7EAF4")), lightRect);
-
-        DrawLabel(context, new Point(darkRect.X, darkRect.Y - 24), "Tiled image brush", accentBrush);
-        context.DrawRectangle(
-            new ImageBrush(_sampleBitmap)
-            {
-                TileMode = TileMode.FlipXY,
-                Stretch = Stretch.UniformToFill,
-                DestinationRect = new RelativeRect(new Rect(0, 0, 84, 84), RelativeUnit.Absolute)
-            },
-            null,
-            darkRect,
-            16,
-            16);
-
-        DrawLabel(context, new Point(ellipseRect.X, ellipseRect.Y - 24), "Stroke and fill", accentBrush);
-        context.DrawEllipse(
-            warmBrush,
-            new Pen(new SolidColorBrush(Color.Parse("#17324D")), 4),
-            ellipseRect);
-
-        DrawLabel(context, new Point(bitmapRect.X, bitmapRect.Y - 24), "Bitmap blit", accentBrush);
-        context.DrawImage(_sampleBitmap, new Rect(_sampleBitmap.Size), bitmapRect);
-
-        DrawLabel(context, new Point(boxShadowRect.X, boxShadowRect.Y - 24), "Box shadows", accentBrush);
-        context.DrawRectangle(
-            Brushes.White,
-            new Pen(new SolidColorBrush(Color.Parse("#D8E1E8")), 1),
-            boxShadowRect,
-            18,
-            18,
-            new BoxShadows(
-                new BoxShadow
-                {
-                    OffsetY = 10,
-                    Blur = 12,
-                    Spread = 0,
-                    Color = Color.FromArgb(70, 17, 50, 77)
-                },
-                new[]
-                {
-                    new BoxShadow
-                    {
-                        OffsetX = 8,
-                        OffsetY = 0,
-                        Blur = 8,
-                        Color = Color.FromArgb(40, 14, 116, 144),
-                        IsInset = true
-                    }
-                }));
-        DrawFormattedText(context, new Point(boxShadowRect.X + 18, boxShadowRect.Y + 22), "Outset + inset shadows", 17, headingBrush, FontWeight.SemiBold);
-        DrawFormattedText(context, new Point(boxShadowRect.X + 18, boxShadowRect.Y + 46), "This rounded panel is drawn with BoxShadows.", 14, bodyBrush);
-
-        var combinedGeometry = new CombinedGeometry(
-            GeometryCombineMode.Exclude,
-            new RectangleGeometry(new Rect(darkRect.X + 12, darkRect.Bottom + 32, 120, 56)),
-            new EllipseGeometry(new Rect(darkRect.X + 70, darkRect.Bottom + 18, 110, 76)));
-        var arcStart = new Point(lightRect.X + 18, ellipseRect.Bottom + 18);
-        var arcEnd = new Point(lightRect.X + 104, ellipseRect.Bottom + 18);
-        var arcGeometry = CreateArcGeometry(arcStart, arcEnd);
-        var maskedRect = new Rect(darkRect.X, bitmapRect.Bottom + 48, Math.Min(300, inner.Width - darkRect.X + inner.X), 72);
-
-        DrawLabel(context, new Point(darkRect.X, darkRect.Bottom - 6), "Combined geometry", accentBrush);
-        context.DrawGeometry(new SolidColorBrush(Color.Parse("#0E7490")), null, combinedGeometry);
-
-        DrawLabel(context, new Point(lightRect.X, ellipseRect.Bottom - 8), "Arc geometry", accentBrush);
-        context.DrawGeometry(null, new Pen(new SolidColorBrush(Color.Parse("#17324D")), 5), arcGeometry);
-
-        DrawLabel(context, new Point(maskedRect.X, maskedRect.Y - 24), "Opacity-masked fill", accentBrush);
-        using (context.PushOpacityMask(
-                   new SolidColorBrush(Color.FromArgb(128, 255, 255, 255)),
-                   maskedRect))
+        var inner = surface.Deflate(16);
+        switch (_scene)
         {
-            context.DrawRectangle(
-                new LinearGradientBrush
-                {
-                    StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
-                    EndPoint = new RelativePoint(1, 1, RelativeUnit.Relative),
-                    GradientStops =
-                    {
-                        new GradientStop(Color.Parse("#12344B"), 0.0),
-                        new GradientStop(Color.Parse("#0E7490"), 0.58),
-                        new GradientStop(Color.Parse("#7AA89A"), 1.0)
-                    }
-                },
-                null,
-                maskedRect,
-                18,
-                18);
+            case RenderGalleryScene.BrushesAndImages:
+                DrawBrushesAndImagesScene(context, inner, headingBrush, bodyBrush, accentBrush, panelStroke);
+                break;
+            case RenderGalleryScene.GeometryAndMasks:
+                DrawGeometryAndMasksScene(context, inner, headingBrush, bodyBrush, accentBrush, panelStroke, warmBrush);
+                break;
+            case RenderGalleryScene.EffectsAndComposition:
+                DrawEffectsAndCompositionScene(context, inner, headingBrush, bodyBrush, accentBrush, panelStroke);
+                break;
+            case RenderGalleryScene.TextFormatting:
+                DrawTextFormattingScene(context, inner, headingBrush, bodyBrush, accentBrush, panelStroke);
+                break;
         }
+    }
 
-        var textPanelTop = Math.Max(Math.Max(maskedRect.Bottom, ellipseRect.Bottom), boxShadowRect.Bottom) + 34;
-        var textPanelHeight = Math.Max(0, inner.Bottom - textPanelTop);
-        var textPanel = new Rect(inner.X, textPanelTop, inner.Width, textPanelHeight);
+    private void DrawBrushesAndImagesScene(
+        DrawingContext context,
+        Rect rect,
+        IBrush headingBrush,
+        IBrush bodyBrush,
+        IBrush accentBrush,
+        Pen panelStroke)
+    {
+        var panels = CreatePanelGrid(rect, 2, 2, 16);
 
+        var solidContent = DrawPanelChrome(context, panels[0], "Solid fill", accentBrush, panelStroke);
+        context.DrawRectangle(new SolidColorBrush(Color.Parse("#D7EAF4")), null, solidContent, 14, 14);
+
+        var gradientContent = DrawPanelChrome(context, panels[1], "Gradient fill", accentBrush, panelStroke);
         context.DrawRectangle(
             new LinearGradientBrush
             {
@@ -154,26 +86,249 @@ internal sealed class RenderGalleryControl : Control
                 GradientStops =
                 {
                     new GradientStop(Color.Parse("#12344B"), 0.0),
-                    new GradientStop(Color.Parse("#0E7490"), 0.62),
+                    new GradientStop(Color.Parse("#0E7490"), 0.55),
                     new GradientStop(Color.Parse("#7AA89A"), 1.0)
                 }
             },
             null,
-            textPanel,
-            26,
-            26);
+            gradientContent,
+            14,
+            14);
 
-        DrawFormattedText(context, new Point(textPanel.X + 24, textPanel.Y + 22), "Formatted text overlay", 22, Brushes.White, FontWeight.SemiBold);
-        DrawFormattedText(context, new Point(textPanel.X + 24, textPanel.Y + 60), "Rich text is demonstrated with real TextBlock inlines on the right.", 17, Brushes.White);
-        DrawFormattedText(context, new Point(textPanel.X + 24, textPanel.Y + 104), "Combined geometry, arc paths, tiled image brushes, and opacity masks are exercised here.", 17, Brushes.White);
-        DrawFormattedText(context, new Point(textPanel.X + 24, textPanel.Y + 140), "The rounded card above uses real BoxShadows while the right panel applies a visual effect.", 17, Brushes.White);
-        DrawFormattedText(context, new Point(textPanel.X + 24, textPanel.Y + 176), "This panel exists to prove custom drawing and normal Avalonia controls render through the same backend.", 17, Brushes.White);
+        var brushContent = DrawPanelChrome(context, panels[2], "Tiled image brush", accentBrush, panelStroke);
+        context.DrawRectangle(
+            new ImageBrush(_sampleBitmap)
+            {
+                TileMode = TileMode.FlipXY,
+                Stretch = Stretch.UniformToFill,
+                DestinationRect = new RelativeRect(new Rect(0, 0, 84, 84), RelativeUnit.Absolute)
+            },
+            null,
+            brushContent,
+            14,
+            14);
+
+        var bitmapContent = DrawPanelChrome(context, panels[3], "Bitmap blit", accentBrush, panelStroke);
+        context.DrawRectangle(Brushes.White, panelStroke, bitmapContent, 14, 14);
+        var imageRect = Inset(bitmapContent, 12);
+        context.DrawImage(_sampleBitmap, new Rect(_sampleBitmap.Size), imageRect);
     }
 
-    private static void DrawLabel(DrawingContext context, Point origin, string text, IBrush brush)
+    private void DrawGeometryAndMasksScene(
+        DrawingContext context,
+        Rect rect,
+        IBrush headingBrush,
+        IBrush bodyBrush,
+        IBrush accentBrush,
+        Pen panelStroke,
+        IBrush warmBrush)
     {
-        DrawFormattedText(context, origin, text, 13, brush, FontWeight.Medium);
+        var panels = CreatePanelGrid(rect, 2, 2, 16);
+
+        var ellipseContent = DrawPanelChrome(context, panels[0], "Stroke and fill", accentBrush, panelStroke);
+        context.DrawEllipse(
+            warmBrush,
+            new Pen(new SolidColorBrush(Color.Parse("#17324D")), 4),
+            ellipseContent);
+
+        var geometryContent = DrawPanelChrome(context, panels[1], "Combined geometry", accentBrush, panelStroke);
+        var combinedGeometry = new CombinedGeometry(
+            GeometryCombineMode.Exclude,
+            new RectangleGeometry(Inset(geometryContent, 10)),
+            new EllipseGeometry(new Rect(
+                geometryContent.X + geometryContent.Width * 0.42,
+                geometryContent.Y - 6,
+                geometryContent.Width * 0.54,
+                geometryContent.Height + 18)));
+        context.DrawGeometry(new SolidColorBrush(Color.Parse("#0E7490")), null, combinedGeometry);
+
+        var arcContent = DrawPanelChrome(context, panels[2], "Arc path", accentBrush, panelStroke);
+        var arcStart = new Point(arcContent.X + 16, arcContent.Bottom - 18);
+        var arcEnd = new Point(arcContent.Right - 16, arcContent.Bottom - 18);
+        context.DrawGeometry(
+            null,
+            new Pen(new SolidColorBrush(Color.Parse("#17324D")), 5),
+            CreateArcGeometry(arcStart, arcEnd));
+
+        var maskContent = DrawPanelChrome(context, panels[3], "Opacity mask", accentBrush, panelStroke);
+        using (context.PushOpacityMask(
+                   new SolidColorBrush(Color.FromArgb(128, 255, 255, 255)),
+                   maskContent))
+        {
+            context.DrawRectangle(
+                new LinearGradientBrush
+                {
+                    StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
+                    EndPoint = new RelativePoint(1, 1, RelativeUnit.Relative),
+                    GradientStops =
+                    {
+                        new GradientStop(Color.Parse("#17324D"), 0.0),
+                        new GradientStop(Color.Parse("#0E7490"), 0.58),
+                        new GradientStop(Color.Parse("#A7D4C8"), 1.0)
+                    }
+                },
+                null,
+                maskContent,
+                14,
+                14);
+        }
     }
+
+    private void DrawEffectsAndCompositionScene(
+        DrawingContext context,
+        Rect rect,
+        IBrush headingBrush,
+        IBrush bodyBrush,
+        IBrush accentBrush,
+        Pen panelStroke)
+    {
+        var panels = CreatePanelGrid(rect, 3, 1, 16);
+
+        var shadowContent = DrawPanelChrome(context, panels[0], "Shadow card", accentBrush, panelStroke);
+        var shadowCard = new Rect(shadowContent.X + 10, shadowContent.Y + 12, shadowContent.Width - 20, shadowContent.Height - 24);
+        context.DrawRectangle(
+            Brushes.White,
+            null,
+            shadowCard,
+            18,
+            18,
+            new BoxShadows(
+                new BoxShadow
+                {
+                    OffsetY = 14,
+                    Blur = 18,
+                    Color = Color.FromArgb(76, 17, 50, 77)
+                },
+                new[]
+                {
+                    new BoxShadow
+                    {
+                        OffsetX = 10,
+                        OffsetY = 0,
+                        Blur = 10,
+                        Color = Color.FromArgb(42, 14, 116, 144),
+                        IsInset = true
+                    }
+                }));
+        DrawFormattedText(context, new Point(shadowCard.X + 18, shadowCard.Y + 18), "Outset + inset", 18, headingBrush, FontWeight.SemiBold);
+        DrawFormattedText(context, new Point(shadowCard.X + 18, shadowCard.Y + 48), "One card, two shadow modes.", 14, bodyBrush);
+
+        var blurContent = DrawPanelChrome(context, panels[1], "Soft light", accentBrush, panelStroke);
+        context.DrawRectangle(new SolidColorBrush(Color.Parse("#17324D")), null, blurContent, 16, 16);
+        context.DrawEllipse(
+            new SolidColorBrush(Color.FromArgb(92, 55, 176, 255)),
+            null,
+            new Rect(blurContent.X + 18, blurContent.Y + 10, 92, 92));
+        context.DrawEllipse(
+            new SolidColorBrush(Color.FromArgb(88, 50, 224, 176)),
+            null,
+            new Rect(blurContent.Right - 118, blurContent.Bottom - 110, 96, 96));
+        context.DrawEllipse(
+            new SolidColorBrush(Color.FromArgb(128, 255, 255, 255)),
+            null,
+            new Rect(blurContent.X + 52, blurContent.Y + 38, 42, 42));
+        context.DrawEllipse(
+            new SolidColorBrush(Color.FromArgb(118, 255, 255, 255)),
+            null,
+            new Rect(blurContent.Right - 82, blurContent.Bottom - 74, 38, 38));
+        DrawFormattedText(context, new Point(blurContent.X + 18, blurContent.Bottom - 42), "Layered light stays contained to the panel.", 14, Brushes.White);
+
+        var opacityContent = DrawPanelChrome(context, panels[2], "Opacity stack", accentBrush, panelStroke);
+        context.DrawRectangle(new SolidColorBrush(Color.Parse("#F3F7FA")), null, opacityContent, 16, 16);
+        using (context.PushOpacity(0.72))
+        {
+            context.DrawRectangle(new SolidColorBrush(Color.Parse("#17324D")), null, new Rect(opacityContent.X + 16, opacityContent.Y + 18, 96, 96), 18, 18);
+            context.DrawRectangle(new SolidColorBrush(Color.Parse("#0E7490")), null, new Rect(opacityContent.X + 68, opacityContent.Y + 44, 96, 96), 18, 18);
+            context.DrawRectangle(new SolidColorBrush(Color.Parse("#8FD0C8")), null, new Rect(opacityContent.X + 38, opacityContent.Y + 96, 96, 64), 18, 18);
+        }
+        DrawFormattedText(context, new Point(opacityContent.X + 16, opacityContent.Bottom - 40), "Grouped alpha stays contained.", 14, bodyBrush);
+    }
+
+    private void DrawTextFormattingScene(
+        DrawingContext context,
+        Rect rect,
+        IBrush headingBrush,
+        IBrush bodyBrush,
+        IBrush accentBrush,
+        Pen panelStroke)
+    {
+        var bannerRect = new Rect(rect.X, rect.Y, rect.Width, 92);
+        context.DrawRectangle(
+            new LinearGradientBrush
+            {
+                StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
+                EndPoint = new RelativePoint(1, 1, RelativeUnit.Relative),
+                GradientStops =
+                {
+                    new GradientStop(Color.Parse("#12344B"), 0.0),
+                    new GradientStop(Color.Parse("#0E7490"), 0.6),
+                    new GradientStop(Color.Parse("#7AA89A"), 1.0)
+                }
+            },
+            null,
+            bannerRect,
+            18,
+            18);
+        DrawFormattedText(context, new Point(bannerRect.X + 18, bannerRect.Y + 18), "FormattedText canvas", 24, Brushes.White, FontWeight.SemiBold);
+        DrawFormattedText(context, new Point(bannerRect.X + 18, bannerRect.Y + 54), "Hierarchy, contrast, and utility labels are rendered through DrawText.", 14, Brushes.White);
+
+        var lowerRect = new Rect(rect.X, bannerRect.Bottom + 16, rect.Width, rect.Bottom - bannerRect.Bottom - 16);
+        var panels = CreatePanelGrid(lowerRect, 2, 1, 16);
+
+        var hierarchyContent = DrawPanelChrome(context, panels[0], "Hierarchy", accentBrush, panelStroke);
+        DrawFormattedText(context, new Point(hierarchyContent.X, hierarchyContent.Y), "Display heading", 26, headingBrush, FontWeight.SemiBold);
+        DrawFormattedText(context, new Point(hierarchyContent.X, hierarchyContent.Y + 38), "Section label", 14, accentBrush, FontWeight.Medium);
+        DrawFormattedText(context, new Point(hierarchyContent.X, hierarchyContent.Y + 64), "Body copy is kept dense but readable in the sample cards.", 15, bodyBrush);
+        DrawFormattedText(context, new Point(hierarchyContent.X, hierarchyContent.Y + 92), "Italic emphasis", 17, accentBrush, FontWeight.Medium, FontStyle.Italic);
+        DrawFormattedText(context, new Point(hierarchyContent.X, hierarchyContent.Y + 124), "12 pt utility text", 12, bodyBrush);
+
+        var contrastContent = DrawPanelChrome(context, panels[1], "Alignment and accents", accentBrush, panelStroke);
+        var noteRect = new Rect(contrastContent.X, contrastContent.Y, contrastContent.Width, 72);
+        context.DrawRectangle(new SolidColorBrush(Color.Parse("#E7F3F5")), null, noteRect, 14, 14);
+        DrawFormattedText(context, new Point(noteRect.X + 14, noteRect.Y + 16), "Accent note", 15, accentBrush, FontWeight.Medium);
+        DrawFormattedText(context, new Point(noteRect.X + 14, noteRect.Y + 40), "FormattedText stays isolated from inline styling samples.", 13, bodyBrush);
+        DrawFormattedText(context, new Point(contrastContent.Right - 118, contrastContent.Y + 104), "22 pt", 22, headingBrush, FontWeight.SemiBold);
+        DrawFormattedText(context, new Point(contrastContent.Right - 112, contrastContent.Y + 140), "Semibold", 13, bodyBrush);
+        DrawFormattedText(context, new Point(contrastContent.X, contrastContent.Y + 116), "15 pt body line", 15, bodyBrush);
+        DrawFormattedText(context, new Point(contrastContent.X, contrastContent.Y + 144), "13 pt metadata", 13, accentBrush, FontWeight.Medium);
+    }
+
+    private static Rect[] CreatePanelGrid(Rect rect, int columns, int rows, double gap)
+    {
+        var panels = new Rect[columns * rows];
+        var panelWidth = (rect.Width - ((columns - 1) * gap)) / columns;
+        var panelHeight = (rect.Height - ((rows - 1) * gap)) / rows;
+
+        var index = 0;
+        for (var row = 0; row < rows; row++)
+        {
+            for (var column = 0; column < columns; column++)
+            {
+                panels[index++] = new Rect(
+                    rect.X + (column * (panelWidth + gap)),
+                    rect.Y + (row * (panelHeight + gap)),
+                    panelWidth,
+                    panelHeight);
+            }
+        }
+
+        return panels;
+    }
+
+    private static Rect DrawPanelChrome(
+        DrawingContext context,
+        Rect panelRect,
+        string title,
+        IBrush accentBrush,
+        Pen panelStroke)
+    {
+        context.DrawRectangle(Brushes.White, panelStroke, panelRect, 16, 16);
+        DrawFormattedText(context, new Point(panelRect.X + 14, panelRect.Y + 12), title, 13, accentBrush, FontWeight.Medium);
+        return new Rect(panelRect.X + 14, panelRect.Y + 40, panelRect.Width - 28, panelRect.Height - 54);
+    }
+
+    private static Rect Inset(Rect rect, double amount) =>
+        new(rect.X + amount, rect.Y + amount, Math.Max(1, rect.Width - (amount * 2)), Math.Max(1, rect.Height - (amount * 2)));
 
     private static void DrawFormattedText(
         DrawingContext context,
