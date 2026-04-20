@@ -1,0 +1,10 @@
+global using System;
+global using System.Collections.Generic;
+global using System.Globalization;
+global using System.Linq;
+global using global::Avalonia;
+global using global::Avalonia.Controls;
+global using global::Avalonia.Controls.Primitives;
+global using global::Avalonia.Media;
+global using global::Avalonia.Media.Imaging;
+global using global::Avalonia.Platform;
