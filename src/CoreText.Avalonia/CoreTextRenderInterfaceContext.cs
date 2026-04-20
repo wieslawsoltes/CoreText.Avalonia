@@ -8,11 +8,27 @@ internal sealed class CoreTextRenderInterfaceContext : IPlatformRenderInterfaceC
 {
     private readonly CoreTextPlatformOptions _options;
     private readonly IMetalDevice? _metalDevice;
+    private readonly CoreTextCoreImageContext _effectsContext;
+    private readonly PixelSize _maxOffscreenRenderTargetPixelSize;
+    private readonly IReadOnlyDictionary<Type, object> _publicFeatures;
 
     public CoreTextRenderInterfaceContext(CoreTextPlatformOptions options, IMetalDevice? metalDevice)
     {
         _options = options;
         _metalDevice = metalDevice;
+        _effectsContext = metalDevice is null
+            ? CoreTextCoreImageContext.SharedSoftware
+            : CoreTextCoreImageContext.ForMetalDevice(metalDevice);
+        _maxOffscreenRenderTargetPixelSize = _effectsContext.MaxOutputPixelSize;
+
+        var features = new Dictionary<Type, object>();
+        if (_metalDevice is not null)
+        {
+            TryAddFeature<IExternalObjectsHandleWrapRenderInterfaceContextFeature>(features);
+            TryAddFeature<IMetalExternalObjectsFeature>(features);
+        }
+
+        _publicFeatures = features;
     }
 
     public IRenderTarget CreateRenderTarget(IEnumerable<IPlatformRenderSurface> surfaces)
@@ -45,19 +61,39 @@ internal sealed class CoreTextRenderInterfaceContext : IPlatformRenderInterfaceC
             scaling * 96,
             PixelFormats.Bgra8888,
             AlphaFormat.Premul,
-            scaleDrawingToDpiOnCreateDrawingContext: false);
+            scaleDrawingToDpiOnCreateDrawingContext: false,
+            enableFontSmoothing: _options.EnableFontSmoothing && enableTextAntialiasing,
+            enableSubpixelPositioning: _options.EnableSubpixelPositioning && enableTextAntialiasing,
+            enableEffects: _options.EnableCoreImageEffects,
+            coreImageContext: _effectsContext);
 
     public bool IsLost => false;
 
-    public IReadOnlyDictionary<Type, object> PublicFeatures { get; } = new Dictionary<Type, object>();
+    public IReadOnlyDictionary<Type, object> PublicFeatures => _publicFeatures;
 
-    public PixelSize? MaxOffscreenRenderTargetPixelSize => null;
+    public PixelSize? MaxOffscreenRenderTargetPixelSize => _maxOffscreenRenderTargetPixelSize;
 
     public bool IsReadyToCreateRenderTarget(IEnumerable<IPlatformRenderSurface> surfaces) => surfaces.Any(static s => s.IsReady);
 
-    public object? TryGetFeature(Type featureType) => null;
+    public object? TryGetFeature(Type featureType)
+    {
+        if (_publicFeatures.TryGetValue(featureType, out var feature))
+        {
+            return feature;
+        }
+
+        return _metalDevice?.TryGetFeature(featureType);
+    }
 
     public void Dispose()
     {
+    }
+
+    private void TryAddFeature<TFeature>(Dictionary<Type, object> features) where TFeature : class
+    {
+        if (_metalDevice?.TryGetFeature(typeof(TFeature)) is TFeature feature)
+        {
+            features[typeof(TFeature)] = feature;
+        }
     }
 }

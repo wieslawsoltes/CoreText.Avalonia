@@ -361,6 +361,12 @@ internal static unsafe partial class CoreTextNative
     internal static partial IntPtr CGBitmapContextCreateImage(IntPtr context);
 
     [LibraryImport("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")]
+    internal static partial IntPtr CGImageCreateWithImageInRect(IntPtr image, CGRect rect);
+
+    [LibraryImport("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")]
+    internal static partial void CGImageRelease(IntPtr image);
+
+    [LibraryImport("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")]
     internal static partial IntPtr CGGradientCreateWithColorComponents(IntPtr colorSpace, double* components, double* locations, nuint count);
 
     [LibraryImport("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")]
@@ -386,6 +392,12 @@ internal static unsafe partial class CoreTextNative
 
     [LibraryImport("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")]
     internal static partial void CGContextSetAlpha(IntPtr context, double alpha);
+
+    [LibraryImport("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")]
+    internal static partial void CGContextSetBlendMode(IntPtr context, int mode);
+
+    [LibraryImport("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")]
+    internal static partial void CGContextSetInterpolationQuality(IntPtr context, int quality);
 
     [LibraryImport("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")]
     internal static partial void CGContextSetShouldAntialias(IntPtr context, [MarshalAs(UnmanagedType.I1)] bool value);

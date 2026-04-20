@@ -1,4 +1,3 @@
-using System.Reflection;
 using Avalonia.Media;
 using Avalonia.Platform;
 using Foundation;
@@ -12,6 +11,9 @@ internal sealed class CoreTextBitmapImpl : IRenderTargetBitmapImpl, IWriteableBi
     private readonly bool _ownsBuffer;
     private readonly bool _ownsContext;
     private readonly bool _scaleDrawingToDpiOnCreateDrawingContext;
+    private readonly bool _enableFontSmoothing;
+    private readonly bool _enableSubpixelPositioning;
+    private readonly bool _enableEffects;
     private IntPtr _data;
     private IntPtr _context;
 
@@ -20,7 +22,12 @@ internal sealed class CoreTextBitmapImpl : IRenderTargetBitmapImpl, IWriteableBi
         Vector dpi,
         PixelFormat format,
         AlphaFormat alphaFormat,
-        bool scaleDrawingToDpiOnCreateDrawingContext = true)
+        bool scaleDrawingToDpiOnCreateDrawingContext = true,
+        bool enableFontSmoothing = true,
+        bool enableSubpixelPositioning = true,
+        bool enableEffects = true,
+        CoreTextCoreImageContext? coreImageContext = null,
+        global::IOSurface.IOSurface? ioSurface = null)
     {
         if (pixelSize.Width <= 0 || pixelSize.Height <= 0)
         {
@@ -32,8 +39,17 @@ internal sealed class CoreTextBitmapImpl : IRenderTargetBitmapImpl, IWriteableBi
         Format = format;
         AlphaFormat = alphaFormat;
         _scaleDrawingToDpiOnCreateDrawingContext = scaleDrawingToDpiOnCreateDrawingContext;
+        _enableFontSmoothing = enableFontSmoothing;
+        _enableSubpixelPositioning = enableSubpixelPositioning;
+        _enableEffects = enableEffects;
+        CoreImageContext = coreImageContext;
+        Surface = ioSurface;
         RowBytes = pixelSize.Width * 4;
         _data = Marshal.AllocHGlobal(RowBytes * pixelSize.Height);
+        unsafe
+        {
+            new Span<byte>((void*)_data, RowBytes * pixelSize.Height).Clear();
+        }
         _ownsBuffer = true;
         _context = CoreTextNative.CreateBitmapContext(_data, pixelSize.Width, pixelSize.Height, RowBytes);
         _ownsContext = true;
@@ -47,7 +63,12 @@ internal sealed class CoreTextBitmapImpl : IRenderTargetBitmapImpl, IWriteableBi
         PixelFormat format,
         AlphaFormat alphaFormat,
         bool ownsBuffer,
-        bool scaleDrawingToDpiOnCreateDrawingContext = true)
+        bool scaleDrawingToDpiOnCreateDrawingContext = true,
+        bool enableFontSmoothing = true,
+        bool enableSubpixelPositioning = true,
+        bool enableEffects = true,
+        CoreTextCoreImageContext? coreImageContext = null,
+        global::IOSurface.IOSurface? ioSurface = null)
     {
         PixelSize = pixelSize;
         Dpi = dpi;
@@ -55,6 +76,11 @@ internal sealed class CoreTextBitmapImpl : IRenderTargetBitmapImpl, IWriteableBi
         Format = format;
         AlphaFormat = alphaFormat;
         _scaleDrawingToDpiOnCreateDrawingContext = scaleDrawingToDpiOnCreateDrawingContext;
+        _enableFontSmoothing = enableFontSmoothing;
+        _enableSubpixelPositioning = enableSubpixelPositioning;
+        _enableEffects = enableEffects;
+        CoreImageContext = coreImageContext;
+        Surface = ioSurface;
         _data = data;
         _ownsBuffer = ownsBuffer;
         _context = CoreTextNative.CreateBitmapContext(_data, pixelSize.Width, pixelSize.Height, rowBytes);
@@ -81,6 +107,16 @@ internal sealed class CoreTextBitmapImpl : IRenderTargetBitmapImpl, IWriteableBi
 
     public IntPtr ContextHandle => _context;
 
+    internal bool EnableFontSmoothing => _enableFontSmoothing;
+
+    internal bool EnableSubpixelPositioning => _enableSubpixelPositioning;
+
+    internal bool EnableEffects => _enableEffects;
+
+    internal CoreTextCoreImageContext? CoreImageContext { get; }
+
+    internal global::IOSurface.IOSurface? Surface { get; }
+
     public ILockedFramebuffer Lock() => new CoreTextLockedFramebuffer(
         _data,
         PixelSize,
@@ -90,7 +126,13 @@ internal sealed class CoreTextBitmapImpl : IRenderTargetBitmapImpl, IWriteableBi
         AlphaFormat ?? global::Avalonia.Platform.AlphaFormat.Premul);
 
     public IDrawingContextImpl CreateDrawingContext() =>
-        new CoreTextDrawingContextImpl(this, disposeAction: IncrementVersion, scaleDrawingToDpi: _scaleDrawingToDpiOnCreateDrawingContext);
+        new CoreTextDrawingContextImpl(
+            this,
+            disposeAction: IncrementVersion,
+            scaleDrawingToDpi: _scaleDrawingToDpiOnCreateDrawingContext,
+            enableFontSmoothing: _enableFontSmoothing,
+            enableSubpixelPositioning: _enableSubpixelPositioning,
+            enableEffects: _enableEffects);
 
     public void Save(string fileName, int? quality = null)
     {
@@ -172,10 +214,57 @@ internal sealed class CoreTextBitmapImpl : IRenderTargetBitmapImpl, IWriteableBi
 
     public void IncrementVersion() => Version++;
 
+    internal void ClearPixels()
+    {
+        unsafe
+        {
+            new Span<byte>((void*)_data, RowBytes * PixelSize.Height).Clear();
+        }
+    }
+
     public CGImage CreateCGImage()
     {
-        var handle = CoreTextNative.CGBitmapContextCreateImage(_context);
+        var handle = CreateCGImageHandle();
         return Runtime.GetINativeObject<CGImage>(handle, true)!;
+    }
+
+    public CGImage CreateCGImage(Rect sourceRect)
+    {
+        var handle = CreateCGImageHandle(sourceRect);
+        return Runtime.GetINativeObject<CGImage>(handle, true)!;
+    }
+
+    public IntPtr CreateCGImageHandle()
+    {
+        return CoreTextNative.CGBitmapContextCreateImage(_context);
+    }
+
+    public IntPtr CreateCGImageHandle(Rect sourceRect)
+    {
+        var logicalWidth = PixelSize.Width / Math.Max(Dpi.X / 96d, 0.0001);
+        var logicalHeight = PixelSize.Height / Math.Max(Dpi.Y / 96d, 0.0001);
+        var clamped = sourceRect.Intersect(new Rect(0, 0, logicalWidth, logicalHeight));
+        if (clamped.Width <= 0 || clamped.Height <= 0)
+        {
+            return CreateCGImageHandle();
+        }
+
+        var imageHandle = CreateCGImageHandle();
+        var scaleX = PixelSize.Width / logicalWidth;
+        var scaleY = PixelSize.Height / logicalHeight;
+        var cropRect = new CoreTextNative.CGRect(
+            clamped.X * scaleX,
+            clamped.Y * scaleY,
+            clamped.Width * scaleX,
+            clamped.Height * scaleY);
+        var croppedHandle = CoreTextNative.CGImageCreateWithImageInRect(imageHandle, cropRect);
+        if (croppedHandle == IntPtr.Zero)
+        {
+            return imageHandle;
+        }
+
+        CoreTextNative.CFRelease(imageHandle);
+        return croppedHandle;
     }
 
     public static CoreTextBitmapImpl Load(string fileName)
@@ -211,7 +300,11 @@ internal sealed class CoreTextBitmapImpl : IRenderTargetBitmapImpl, IWriteableBi
             destinationSize,
             source.Dpi,
             source.Format ?? PixelFormats.Bgra8888,
-            source.AlphaFormat ?? global::Avalonia.Platform.AlphaFormat.Premul);
+            source.AlphaFormat ?? global::Avalonia.Platform.AlphaFormat.Premul,
+            enableFontSmoothing: source.EnableFontSmoothing,
+            enableSubpixelPositioning: source.EnableSubpixelPositioning,
+            enableEffects: source.EnableEffects,
+            coreImageContext: source.CoreImageContext);
 
         using var sourceImage = source.CreateCGImage();
         CoreTextNative.CGContextSaveGState(resized.ContextHandle);

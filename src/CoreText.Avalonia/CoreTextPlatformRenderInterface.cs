@@ -46,10 +46,24 @@ internal sealed class CoreTextPlatformRenderInterface : IPlatformRenderInterface
     public IGeometryImpl BuildGlyphRunGeometry(GlyphRun glyphRun) => CoreTextGeometryImpl.CreateGlyphRun(glyphRun);
 
     public IRenderTargetBitmapImpl CreateRenderTargetBitmap(PixelSize size, Vector dpi) =>
-        new CoreTextBitmapImpl(size, dpi, PixelFormats.Bgra8888, AlphaFormat.Premul);
+        new CoreTextBitmapImpl(
+            size,
+            dpi,
+            PixelFormats.Bgra8888,
+            AlphaFormat.Premul,
+            enableFontSmoothing: _options.EnableFontSmoothing,
+            enableSubpixelPositioning: _options.EnableSubpixelPositioning,
+            enableEffects: _options.EnableCoreImageEffects);
 
     public IWriteableBitmapImpl CreateWriteableBitmap(PixelSize size, Vector dpi, PixelFormat format, AlphaFormat alphaFormat) =>
-        new CoreTextBitmapImpl(size, dpi, format, alphaFormat);
+        new CoreTextBitmapImpl(
+            size,
+            dpi,
+            format,
+            alphaFormat,
+            enableFontSmoothing: _options.EnableFontSmoothing,
+            enableSubpixelPositioning: _options.EnableSubpixelPositioning,
+            enableEffects: _options.EnableCoreImageEffects);
 
     public IBitmapImpl LoadBitmap(string fileName) => CoreTextBitmapImpl.Load(fileName);
 
@@ -75,7 +89,17 @@ internal sealed class CoreTextPlatformRenderInterface : IPlatformRenderInterface
         CoreTextBitmapImpl.Resize(bitmapImpl, destinationSize, interpolationMode);
 
     public IBitmapImpl LoadBitmap(PixelFormat format, AlphaFormat alphaFormat, IntPtr data, PixelSize size, Vector dpi, int stride) =>
-        new CoreTextBitmapImpl(data, size, dpi, stride, format, alphaFormat, ownsBuffer: false);
+        new CoreTextBitmapImpl(
+            data,
+            size,
+            dpi,
+            stride,
+            format,
+            alphaFormat,
+            ownsBuffer: false,
+            enableFontSmoothing: _options.EnableFontSmoothing,
+            enableSubpixelPositioning: _options.EnableSubpixelPositioning,
+            enableEffects: _options.EnableCoreImageEffects);
 
     public IGlyphRunImpl CreateGlyphRun(GlyphTypeface glyphTypeface, double fontRenderingEmSize, IReadOnlyList<GlyphInfo> glyphInfos, Point baselineOrigin) =>
         new CoreTextGlyphRunImpl(glyphTypeface, fontRenderingEmSize, glyphInfos, baselineOrigin);
