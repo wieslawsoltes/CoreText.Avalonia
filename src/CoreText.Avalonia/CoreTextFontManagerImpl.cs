@@ -78,6 +78,12 @@ internal sealed class CoreTextFontManagerImpl : IFontManagerImpl
             return false;
         }
 
+        if (!_options.PreferPlatformFontFallback)
+        {
+            platformTypeface = baseTypeface;
+            return true;
+        }
+
         var ch = char.ConvertFromUtf32(codepoint);
         var matched = baseTypeface.CreateFallbackForString(ch, fontStyle, fontWeight, fontStretch);
         if (matched is null)

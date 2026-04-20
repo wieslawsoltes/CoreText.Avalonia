@@ -112,7 +112,7 @@ internal abstract class CoreTextGeometryImpl : IGeometryImpl
         }
     }
 
-    private sealed class CombinedGeometry : CoreTextGeometryImpl
+    internal sealed class CombinedGeometry : CoreTextGeometryImpl
     {
         private readonly GeometryCombineMode _combineMode;
         private readonly CoreTextGeometryImpl _left;
@@ -133,6 +133,12 @@ internal abstract class CoreTextGeometryImpl : IGeometryImpl
         }
 
         public override Rect Bounds { get; }
+
+        public GeometryCombineMode CombineMode => _combineMode;
+
+        public CoreTextGeometryImpl Left => _left;
+
+        public CoreTextGeometryImpl Right => _right;
 
         public override void Replay(CoreTextPathBuilder pathBuilder)
         {
@@ -246,6 +252,13 @@ internal sealed class CoreTextStreamGeometryImpl : CoreTextGeometryImpl, IStream
         _bounds = _bounds == default ? new Rect(point, point) : _bounds.Union(new Rect(point, point));
     }
 
+    private void AddBezierBounds(Point controlPoint1, Point controlPoint2, Point endPoint)
+    {
+        AddPoint(controlPoint1);
+        AddPoint(controlPoint2);
+        AddPoint(endPoint);
+    }
+
     private delegate void GeometryCommand(CoreTextPathBuilder builder);
 
     private sealed class Context : IStreamGeometryContextImpl
@@ -276,9 +289,22 @@ internal sealed class CoreTextStreamGeometryImpl : CoreTextGeometryImpl, IStream
 
         public void ArcTo(Point point, Size size, double rotationAngle, bool isLargeArc, SweepDirection sweepDirection, bool isStroked = true)
         {
+            var startPoint = _currentPoint;
+            if (TryCreateArcSegments(startPoint, point, size, rotationAngle, isLargeArc, sweepDirection, out var segments))
+            {
+                foreach (var segment in segments)
+                {
+                    _owner.AddBezierBounds(segment.ControlPoint1, segment.ControlPoint2, segment.EndPoint);
+                    _owner._commands.Add(builder => builder.CubicBezierTo(segment.ControlPoint1, segment.ControlPoint2, segment.EndPoint));
+                }
+            }
+            else
+            {
+                _owner.AddPoint(point);
+                _owner._commands.Add(builder => builder.LineTo(point));
+            }
+
             _currentPoint = point;
-            _owner.AddPoint(point);
-            _owner._commands.Add(builder => builder.LineTo(point));
         }
 
         public void CubicBezierTo(Point controlPoint1, Point controlPoint2, Point endPoint, bool isStroked = true)
@@ -303,6 +329,155 @@ internal sealed class CoreTextStreamGeometryImpl : CoreTextGeometryImpl, IStream
         public void Dispose()
         {
         }
+
+        private static bool TryCreateArcSegments(
+            Point startPoint,
+            Point endPoint,
+            Size size,
+            double rotationAngleDegrees,
+            bool isLargeArc,
+            SweepDirection sweepDirection,
+            out IReadOnlyList<ArcSegmentData> segments)
+        {
+            segments = Array.Empty<ArcSegmentData>();
+
+            var rx = Math.Abs(size.Width);
+            var ry = Math.Abs(size.Height);
+            if (rx <= 0 || ry <= 0 || startPoint == endPoint)
+            {
+                return false;
+            }
+
+            var phi = rotationAngleDegrees * (Math.PI / 180d);
+            var cosPhi = Math.Cos(phi);
+            var sinPhi = Math.Sin(phi);
+
+            var dx2 = (startPoint.X - endPoint.X) / 2d;
+            var dy2 = (startPoint.Y - endPoint.Y) / 2d;
+            var x1Prime = (cosPhi * dx2) + (sinPhi * dy2);
+            var y1Prime = (-sinPhi * dx2) + (cosPhi * dy2);
+
+            var rxSq = rx * rx;
+            var rySq = ry * ry;
+            var x1PrimeSq = x1Prime * x1Prime;
+            var y1PrimeSq = y1Prime * y1Prime;
+
+            var lambda = (x1PrimeSq / rxSq) + (y1PrimeSq / rySq);
+            if (lambda > 1d)
+            {
+                var scale = Math.Sqrt(lambda);
+                rx *= scale;
+                ry *= scale;
+                rxSq = rx * rx;
+                rySq = ry * ry;
+            }
+
+            var numerator = (rxSq * rySq) - (rxSq * y1PrimeSq) - (rySq * x1PrimeSq);
+            var denominator = (rxSq * y1PrimeSq) + (rySq * x1PrimeSq);
+            if (denominator == 0)
+            {
+                return false;
+            }
+
+            var sign = isLargeArc == (sweepDirection == SweepDirection.Clockwise) ? -1d : 1d;
+            var coefficient = sign * Math.Sqrt(Math.Max(0d, numerator / denominator));
+            var cxPrime = coefficient * ((rx * y1Prime) / ry);
+            var cyPrime = coefficient * (-(ry * x1Prime) / rx);
+
+            var centerX = (cosPhi * cxPrime) - (sinPhi * cyPrime) + ((startPoint.X + endPoint.X) / 2d);
+            var centerY = (sinPhi * cxPrime) + (cosPhi * cyPrime) + ((startPoint.Y + endPoint.Y) / 2d);
+
+            var theta1 = VectorAngle(1d, 0d, (x1Prime - cxPrime) / rx, (y1Prime - cyPrime) / ry);
+            var deltaTheta = VectorAngle(
+                (x1Prime - cxPrime) / rx,
+                (y1Prime - cyPrime) / ry,
+                (-x1Prime - cxPrime) / rx,
+                (-y1Prime - cyPrime) / ry);
+
+            if (sweepDirection == SweepDirection.Clockwise)
+            {
+                if (deltaTheta < 0)
+                {
+                    deltaTheta += Math.PI * 2d;
+                }
+            }
+            else if (deltaTheta > 0)
+            {
+                deltaTheta -= Math.PI * 2d;
+            }
+
+            var segmentCount = Math.Max(1, (int)Math.Ceiling(Math.Abs(deltaTheta) / (Math.PI / 2d)));
+            var delta = deltaTheta / segmentCount;
+            var result = new List<ArcSegmentData>(segmentCount);
+
+            for (var i = 0; i < segmentCount; i++)
+            {
+                var startAngle = theta1 + (i * delta);
+                var endAngle = startAngle + delta;
+                var alpha = (4d / 3d) * Math.Tan((endAngle - startAngle) / 4d);
+
+                var cosStart = Math.Cos(startAngle);
+                var sinStart = Math.Sin(startAngle);
+                var cosEnd = Math.Cos(endAngle);
+                var sinEnd = Math.Sin(endAngle);
+
+                var controlPoint1 = MapEllipsePoint(
+                    centerX,
+                    centerY,
+                    rx,
+                    ry,
+                    cosPhi,
+                    sinPhi,
+                    cosStart - (alpha * sinStart),
+                    sinStart + (alpha * cosStart));
+                var controlPoint2 = MapEllipsePoint(
+                    centerX,
+                    centerY,
+                    rx,
+                    ry,
+                    cosPhi,
+                    sinPhi,
+                    cosEnd + (alpha * sinEnd),
+                    sinEnd - (alpha * cosEnd));
+                var segmentEnd = MapEllipsePoint(centerX, centerY, rx, ry, cosPhi, sinPhi, cosEnd, sinEnd);
+
+                result.Add(new ArcSegmentData(controlPoint1, controlPoint2, segmentEnd));
+            }
+
+            segments = result;
+            return true;
+        }
+
+        private static double VectorAngle(double ux, double uy, double vx, double vy)
+        {
+            var dot = (ux * vx) + (uy * vy);
+            var magnitude = Math.Sqrt(((ux * ux) + (uy * uy)) * ((vx * vx) + (vy * vy)));
+            if (magnitude <= 0)
+            {
+                return 0;
+            }
+
+            var ratio = Math.Clamp(dot / magnitude, -1d, 1d);
+            var angle = Math.Acos(ratio);
+            return ((ux * vy) - (uy * vx)) < 0 ? -angle : angle;
+        }
+
+        private static Point MapEllipsePoint(
+            double centerX,
+            double centerY,
+            double rx,
+            double ry,
+            double cosPhi,
+            double sinPhi,
+            double x,
+            double y)
+        {
+            return new Point(
+                centerX + (cosPhi * rx * x) - (sinPhi * ry * y),
+                centerY + (sinPhi * rx * x) + (cosPhi * ry * y));
+        }
+
+        private readonly record struct ArcSegmentData(Point ControlPoint1, Point ControlPoint2, Point EndPoint);
     }
 }
 
