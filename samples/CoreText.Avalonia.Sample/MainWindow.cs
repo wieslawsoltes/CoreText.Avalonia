@@ -13,106 +13,99 @@ internal sealed class MainWindow : Window
         Height = 940;
         MinWidth = 1180;
         MinHeight = 760;
-        Background = new SolidColorBrush(Color.Parse("#EAF2F8"));
+        Background = new SolidColorBrush(Color.Parse("#F8FBFD"));
 
         var sampleBitmap = SampleBitmapFactory.Create();
         Closed += (_, _) => sampleBitmap.Dispose();
 
-        var shell = new Grid
-        {
-            RowSpacing = 20
-        };
-        shell.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-        shell.RowDefinitions.Add(new RowDefinition(new GridLength(1, GridUnitType.Star)));
-
-        var header = CreateHeader(surfaceMode);
-        shell.Children.Add(header);
-
-        var tabs = CreateTabs(surfaceMode, sampleBitmap);
-        Grid.SetRow(tabs, 1);
-        shell.Children.Add(tabs);
-
         Content = new Border
         {
-            Margin = new Thickness(26),
-            Padding = new Thickness(24),
-            CornerRadius = new CornerRadius(24),
+            Margin = new Thickness(18),
+            Padding = new Thickness(18),
+            CornerRadius = new CornerRadius(20),
             Background = Brushes.White,
             BorderBrush = new SolidColorBrush(Color.Parse("#D7E3ED")),
             BorderThickness = new Thickness(1),
-            Child = shell
+            Child = CreateTabs(surfaceMode, sampleBitmap)
         };
-    }
-
-    private static Control CreateHeader(CoreTextSurfaceMode surfaceMode)
-    {
-        var grid = new Grid
-        {
-            ColumnSpacing = 18
-        };
-        grid.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(1, GridUnitType.Star)));
-        grid.ColumnDefinitions.Add(new ColumnDefinition(new GridLength(310, GridUnitType.Pixel)));
-
-        var intro = new StackPanel
-        {
-            Spacing = 10
-        };
-        intro.Children.Add(new TextBlock
-        {
-            Text = "CoreText.Avalonia Sample Gallery",
-            FontSize = 30,
-            FontWeight = FontWeight.SemiBold,
-            Foreground = new SolidColorBrush(Color.Parse("#17324D"))
-        });
-        intro.Children.Add(new TextBlock
-        {
-            Text = "The sample is organized into focused tabs so rendering, text, effects, and control coverage are easier to inspect independently.",
-            FontSize = 15,
-            Foreground = new SolidColorBrush(Color.Parse("#5B7083")),
-            TextWrapping = TextWrapping.Wrap,
-            MaxWidth = 760
-        });
-
-        var badgeRow = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 8
-        };
-        badgeRow.Children.Add(CreateBadge($"{surfaceMode} surface", "#0E7490", "#D8F0F4"));
-        badgeRow.Children.Add(CreateBadge("Rendering", "#1D4ED8", "#DBEAFE"));
-        badgeRow.Children.Add(CreateBadge("Text", "#7C3AED", "#EDE9FE"));
-        badgeRow.Children.Add(CreateBadge("Controls", "#0F766E", "#DDF5F0"));
-        intro.Children.Add(badgeRow);
-
-        grid.Children.Add(intro);
-
-        var summary = CreateCard(
-            "Session layout",
-            "Tabs group the sample by renderer capability instead of mixing every scenario into one surface.",
-            CreateInfoRow("Rendering", "Brushes, geometry, masks, shadows, effects"),
-            CreateInfoRow("Text & Layout", "FormattedText, hierarchy, rich inlines"),
-            CreateInfoRow("Controls", "Inputs, selection, values, and action states"));
-        Grid.SetColumn(summary, 1);
-        grid.Children.Add(summary);
-
-        return grid;
     }
 
     private static Control CreateTabs(CoreTextSurfaceMode surfaceMode, WriteableBitmap sampleBitmap)
     {
-        var tabControl = new TabControl();
-        tabControl.Items.Add(CreateTab("Rendering", CreateRenderingTab(sampleBitmap)));
-        tabControl.Items.Add(CreateTab("Text & Layout", CreateTextTab(sampleBitmap)));
-        tabControl.Items.Add(CreateTab("Controls", CreateControlsTab(surfaceMode)));
-        return tabControl;
+        var rendering = CreateRenderingTab(sampleBitmap);
+        var textLayout = CreateTextTab(sampleBitmap);
+        var controls = CreateControlsTab(surfaceMode);
+
+        var contentHost = new Border
+        {
+            Padding = new Thickness(0, 12, 0, 0),
+            Child = rendering
+        };
+
+        var tabRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 10
+        };
+
+        var tabs = new[]
+        {
+            (Button: CreateTabButton("Rendering"), Content: rendering),
+            (Button: CreateTabButton("Text & Layout"), Content: textLayout),
+            (Button: CreateTabButton("Controls"), Content: controls)
+        };
+
+        foreach (var tab in tabs)
+        {
+            var selectedButton = tab.Button;
+            var selectedContent = tab.Content;
+            selectedButton.Click += (_, _) =>
+            {
+                contentHost.Child = selectedContent;
+                foreach (var candidate in tabs)
+                {
+                    ApplyTabButtonState(candidate.Button, ReferenceEquals(candidate.Button, selectedButton));
+                }
+            };
+
+            tabRow.Children.Add(selectedButton);
+        }
+
+        ApplyTabButtonState(tabs[0].Button, selected: true);
+
+        var shell = new Grid
+        {
+            RowSpacing = 4
+        };
+        shell.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+        shell.RowDefinitions.Add(new RowDefinition(new GridLength(1, GridUnitType.Star)));
+        shell.Children.Add(tabRow);
+        Grid.SetRow(contentHost, 1);
+        shell.Children.Add(contentHost);
+        return shell;
     }
 
-    private static TabItem CreateTab(string header, Control content) =>
+    private static Button CreateTabButton(string title) =>
         new()
         {
-            Header = header,
-            Content = content
+            Content = title,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0, 0, 0, 3),
+            Padding = new Thickness(0, 8, 0, 10),
+            FontSize = 18,
+            FontWeight = FontWeight.Medium
         };
+
+    private static void ApplyTabButtonState(Button button, bool selected)
+    {
+        button.BorderBrush = selected
+            ? new SolidColorBrush(Color.Parse("#1D7DFF"))
+            : Brushes.Transparent;
+        button.Foreground = selected
+            ? new SolidColorBrush(Color.Parse("#17324D"))
+            : new SolidColorBrush(Color.Parse("#5B7083"));
+    }
 
     private static Control CreateRenderingTab(WriteableBitmap sampleBitmap)
     {
@@ -123,7 +116,7 @@ internal sealed class MainWindow : Window
             "Solid fills, gradients, tiled image brushes, and bitmap blits are grouped together in one surface.",
             new RenderGalleryControl(sampleBitmap, RenderGalleryScene.BrushesAndImages)
             {
-                Height = 320
+                Height = 272
             });
         layout.Children.Add(brushesCard);
 
@@ -132,7 +125,7 @@ internal sealed class MainWindow : Window
             "Shapes, arc paths, combined geometry, and opacity masking are isolated into a separate scene.",
             new RenderGalleryControl(sampleBitmap, RenderGalleryScene.GeometryAndMasks)
             {
-                Height = 320
+                Height = 272
             });
         Grid.SetColumn(geometryCard, 1);
         layout.Children.Add(geometryCard);
@@ -142,13 +135,13 @@ internal sealed class MainWindow : Window
             "This scene exercises blur, layered opacity, and shadow-heavy composition without crowding the other drawing samples.",
             new RenderGalleryControl(sampleBitmap, RenderGalleryScene.EffectsAndComposition)
             {
-                Height = 272
+                Height = 220
             });
         Grid.SetRow(effectsCard, 1);
         Grid.SetColumnSpan(effectsCard, 2);
         layout.Children.Add(effectsCard);
 
-        return CreateTabHost(layout);
+        return layout;
     }
 
     private static Control CreateTextTab(WriteableBitmap sampleBitmap)
@@ -160,7 +153,7 @@ internal sealed class MainWindow : Window
             "The custom-drawn text surface focuses on hierarchy, sizing, alignment, and contrast through the normal Avalonia formatter.",
             new RenderGalleryControl(sampleBitmap, RenderGalleryScene.TextFormatting)
             {
-                Height = 320
+                Height = 272
             });
         layout.Children.Add(formattedCanvasCard);
 
@@ -181,7 +174,7 @@ internal sealed class MainWindow : Window
         Grid.SetColumnSpan(typographyCard, 2);
         layout.Children.Add(typographyCard);
 
-        return CreateTabHost(layout);
+        return layout;
     }
 
     private static Control CreateControlsTab(CoreTextSurfaceMode surfaceMode)
@@ -241,16 +234,8 @@ internal sealed class MainWindow : Window
         Grid.SetColumnSpan(interactionCard, 2);
         layout.Children.Add(interactionCard);
 
-        return CreateTabHost(layout);
+        return layout;
     }
-
-    private static Control CreateTabHost(Control content) =>
-        new ScrollViewer
-        {
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            Content = content
-        };
 
     private static Grid CreateTwoColumnGrid()
     {
@@ -300,45 +285,13 @@ internal sealed class MainWindow : Window
 
         return new Border
         {
-            Padding = new Thickness(20),
-            CornerRadius = new CornerRadius(18),
-            Background = new SolidColorBrush(Color.Parse("#F7FAFD")),
+            Padding = new Thickness(18),
+            CornerRadius = new CornerRadius(16),
+            Background = new SolidColorBrush(Color.Parse("#FBFDFE")),
             BorderBrush = new SolidColorBrush(Color.Parse("#D9E4EE")),
             BorderThickness = new Thickness(1),
-            BoxShadow = new BoxShadows(new BoxShadow
-            {
-                OffsetY = 10,
-                Blur = 18,
-                Color = Color.FromArgb(34, 23, 50, 77)
-            }),
             Child = stack
         };
-    }
-
-    private static Control CreateInfoRow(string label, string value)
-    {
-        var grid = new Grid
-        {
-            ColumnDefinitions = new ColumnDefinitions("96,*")
-        };
-        grid.Children.Add(new TextBlock
-        {
-            Text = label,
-            FontSize = 13,
-            FontWeight = FontWeight.Medium,
-            Foreground = new SolidColorBrush(Color.Parse("#0E7490"))
-        });
-
-        var valueBlock = new TextBlock
-        {
-            Text = value,
-            FontSize = 13,
-            Foreground = new SolidColorBrush(Color.Parse("#5B7083")),
-            TextWrapping = TextWrapping.Wrap
-        };
-        Grid.SetColumn(valueBlock, 1);
-        grid.Children.Add(valueBlock);
-        return grid;
     }
 
     private static Control CreateButtonRow()
@@ -598,18 +551,4 @@ internal sealed class MainWindow : Window
             TextWrapping = TextWrapping.Wrap
         };
 
-    private static Border CreateBadge(string text, string foregroundHex, string backgroundHex) =>
-        new()
-        {
-            Padding = new Thickness(10, 5),
-            CornerRadius = new CornerRadius(999),
-            Background = new SolidColorBrush(Color.Parse(backgroundHex)),
-            Child = new TextBlock
-            {
-                Text = text,
-                FontSize = 12,
-                FontWeight = FontWeight.Medium,
-                Foreground = new SolidColorBrush(Color.Parse(foregroundHex))
-            }
-        };
 }
