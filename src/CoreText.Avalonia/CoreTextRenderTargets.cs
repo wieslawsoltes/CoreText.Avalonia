@@ -71,6 +71,7 @@ internal sealed class CoreTextFramebufferRenderTarget : IRenderTarget
 internal sealed class CoreTextMetalRenderTarget : IRenderTarget
 {
     private const uint BgraFourCc = ((uint)'B' << 24) | ((uint)'G' << 16) | ((uint)'R' << 8) | 'A';
+    private const int BytesPerPixel = 4;
     private readonly CoreTextPlatformOptions _options;
     private readonly IMetalDevice _device;
     private readonly IMTLDevice _metalDevice;
@@ -147,6 +148,29 @@ internal sealed class CoreTextMetalRenderTarget : IRenderTarget
         _target = null;
     }
 
+    internal static int GetAlignedBytesPerRow(IMTLDevice metalDevice, int width)
+    {
+        var minimumAlignment = (int)metalDevice.GetMinimumLinearTextureAlignment(MTLPixelFormat.BGRA8Unorm);
+        return GetAlignedBytesPerRow(width, minimumAlignment);
+    }
+
+    internal static int GetAlignedBytesPerRow(int width, int minimumAlignment)
+    {
+        var rawBytesPerRow = checked(width * BytesPerPixel);
+        if (minimumAlignment <= 0)
+        {
+            return rawBytesPerRow;
+        }
+
+        return AlignUp(rawBytesPerRow, minimumAlignment);
+    }
+
+    private static int AlignUp(int value, int alignment)
+    {
+        var remainder = value % alignment;
+        return remainder == 0 ? value : checked(value + (alignment - remainder));
+    }
+
     private sealed class CoreTextMetalBackBuffer : IDisposable
     {
         private readonly IOSurface.IOSurface _surface;
@@ -163,13 +187,14 @@ internal sealed class CoreTextMetalRenderTarget : IRenderTarget
         {
             PixelSize = pixelSize;
             Dpi = dpi;
+            var bytesPerRow = GetAlignedBytesPerRow(metalDevice, pixelSize.Width);
 
             _surface = new IOSurface.IOSurface(new IOSurfaceOptions
             {
                 Width = pixelSize.Width,
                 Height = pixelSize.Height,
-                BytesPerElement = 4,
-                BytesPerRow = pixelSize.Width * 4,
+                BytesPerElement = BytesPerPixel,
+                BytesPerRow = bytesPerRow,
                 PixelFormat = BgraFourCc
             });
 

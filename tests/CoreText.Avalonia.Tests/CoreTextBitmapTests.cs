@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Media;
 using Avalonia.Platform;
+using Metal;
 
 namespace CoreText.Avalonia.Tests;
 
@@ -690,6 +691,33 @@ public sealed class CoreTextBitmapTests
         Assert.True(IsRed(ReadPixel(framebuffer.Address, stride, 40, 30)));
         Assert.True(IsRed(ReadPixel(framebuffer.Address, stride, 80, 70)));
         Assert.False(IsRed(ReadPixel(framebuffer.Address, stride, 96, 70)));
+    }
+
+    [Fact]
+    public void MetalStrideAlignmentRoundsOddWidthsUpToRequiredBoundary()
+    {
+        var aligned = CoreText.Avalonia.CoreTextMetalRenderTarget.GetAlignedBytesPerRow(913, 256);
+
+        Assert.Equal(0, aligned % 256);
+        Assert.True(aligned >= 913 * 4);
+        Assert.Equal(3840, aligned);
+    }
+
+    [Fact]
+    public void MetalStrideAlignmentMatchesCurrentDeviceRequirement()
+    {
+        using var device = MTLDevice.SystemDefault;
+        Assert.NotNull(device);
+
+        const int width = 913;
+        var minimumAlignment = (int)device.GetMinimumLinearTextureAlignment(MTLPixelFormat.BGRA8Unorm);
+        var bytesPerRow = CoreText.Avalonia.CoreTextMetalRenderTarget.GetAlignedBytesPerRow(device, width);
+
+        Assert.True(bytesPerRow >= width * 4);
+        if (minimumAlignment > 0)
+        {
+            Assert.Equal(0, bytesPerRow % minimumAlignment);
+        }
     }
 
     private static void AssertRectangleDraw(PixelSize pixelSize, Vector dpi, Point inside1, Point inside2, Point outside)
