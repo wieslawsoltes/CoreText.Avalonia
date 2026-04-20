@@ -14,6 +14,8 @@ internal sealed class CoreTextBitmapImpl : IRenderTargetBitmapImpl, IWriteableBi
     private readonly bool _enableFontSmoothing;
     private readonly bool _enableSubpixelPositioning;
     private readonly bool _enableEffects;
+    private readonly long _ownedBufferSize;
+    private bool _disposed;
     private IntPtr _data;
     private IntPtr _context;
 
@@ -45,7 +47,9 @@ internal sealed class CoreTextBitmapImpl : IRenderTargetBitmapImpl, IWriteableBi
         CoreImageContext = coreImageContext;
         Surface = ioSurface;
         RowBytes = pixelSize.Width * 4;
+        _ownedBufferSize = (long)RowBytes * pixelSize.Height;
         _data = Marshal.AllocHGlobal(RowBytes * pixelSize.Height);
+        GC.AddMemoryPressure(_ownedBufferSize);
         unsafe
         {
             new Span<byte>((void*)_data, RowBytes * pixelSize.Height).Clear();
@@ -83,6 +87,12 @@ internal sealed class CoreTextBitmapImpl : IRenderTargetBitmapImpl, IWriteableBi
         Surface = ioSurface;
         _data = data;
         _ownsBuffer = ownsBuffer;
+        if (_ownsBuffer)
+        {
+            _ownedBufferSize = (long)rowBytes * pixelSize.Height;
+            GC.AddMemoryPressure(_ownedBufferSize);
+        }
+
         _context = CoreTextNative.CreateBitmapContext(_data, pixelSize.Width, pixelSize.Height, rowBytes);
         _ownsContext = true;
     }
@@ -199,17 +209,8 @@ internal sealed class CoreTextBitmapImpl : IRenderTargetBitmapImpl, IWriteableBi
 
     public void Dispose()
     {
-        if (_ownsContext && _context != IntPtr.Zero)
-        {
-            CoreTextNative.CGContextRelease(_context);
-            _context = IntPtr.Zero;
-        }
-
-        if (_ownsBuffer && _data != IntPtr.Zero)
-        {
-            Marshal.FreeHGlobal(_data);
-            _data = IntPtr.Zero;
-        }
+        Dispose(disposing: true);
+        GC.SuppressFinalize(this);
     }
 
     public void IncrementVersion() => Version++;
@@ -372,5 +373,37 @@ internal sealed class CoreTextBitmapImpl : IRenderTargetBitmapImpl, IWriteableBi
         public void Dispose()
         {
         }
+    }
+
+    ~CoreTextBitmapImpl()
+    {
+        Dispose(disposing: false);
+    }
+
+    private void Dispose(bool disposing)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        if (_ownsContext && _context != IntPtr.Zero)
+        {
+            CoreTextNative.CGContextRelease(_context);
+            _context = IntPtr.Zero;
+        }
+
+        if (_ownsBuffer && _data != IntPtr.Zero)
+        {
+            Marshal.FreeHGlobal(_data);
+            _data = IntPtr.Zero;
+        }
+
+        if (_ownsBuffer && _ownedBufferSize > 0)
+        {
+            GC.RemoveMemoryPressure(_ownedBufferSize);
+        }
+
+        _disposed = true;
     }
 }

@@ -4,6 +4,24 @@ namespace CoreText.Avalonia;
 
 internal sealed class CoreTextDrawingContextImpl : IDrawingContextImpl, IDrawingContextImplWithEffects, IDrawingContextWithAcrylicLikeSupport
 {
+    private sealed class BitmapRegion : IDisposable
+    {
+        public BitmapRegion(CoreTextBitmapImpl bitmap, Rect logicalBounds, PixelPoint pixelOffset)
+        {
+            Bitmap = bitmap;
+            LogicalBounds = logicalBounds;
+            PixelOffset = pixelOffset;
+        }
+
+        public CoreTextBitmapImpl Bitmap { get; }
+
+        public Rect LogicalBounds { get; }
+
+        public PixelPoint PixelOffset { get; }
+
+        public void Dispose() => Bitmap.Dispose();
+    }
+
     private const int PathDrawingModeFill = 0;
     private const int PathDrawingModeEvenOddFill = 1;
     private const int PathDrawingModeStroke = 2;
@@ -18,6 +36,7 @@ internal sealed class CoreTextDrawingContextImpl : IDrawingContextImpl, IDrawing
     private readonly bool _enableSubpixelPositioning;
     private readonly bool _enableEffects;
     private CoreTextBitmapImpl _bitmap;
+    private Point _surfaceOrigin;
     private double _opacity = 1;
     private RenderOptions _currentRenderOptions;
     private TextOptions _currentTextOptions;
@@ -30,7 +49,8 @@ internal sealed class CoreTextDrawingContextImpl : IDrawingContextImpl, IDrawing
         bool enableFontSmoothing = true,
         bool enableSubpixelPositioning = true,
         bool enableEffects = true,
-        bool initializeBitmapContext = true)
+        bool initializeBitmapContext = true,
+        Point surfaceOrigin = default)
     {
         _bitmap = bitmap;
         _disposeAction = disposeAction;
@@ -39,6 +59,7 @@ internal sealed class CoreTextDrawingContextImpl : IDrawingContextImpl, IDrawing
         _enableFontSmoothing = enableFontSmoothing;
         _enableSubpixelPositioning = enableSubpixelPositioning;
         _enableEffects = enableEffects;
+        _surfaceOrigin = surfaceOrigin;
         Transform = Matrix.Identity;
         if (initializeBitmapContext)
         {
@@ -238,6 +259,11 @@ internal sealed class CoreTextDrawingContextImpl : IDrawingContextImpl, IDrawing
     public void PushClip(Rect clip)
     {
         var transformedClip = Transform == Matrix.Identity ? clip : clip.TransformToAABB(Transform);
+        if (_surfaceOrigin != default)
+        {
+            transformedClip = transformedClip.Translate(new Vector(-_surfaceOrigin.X, -_surfaceOrigin.Y));
+        }
+
         CoreTextNative.CGContextSaveGState(_bitmap.ContextHandle);
         CoreTextNative.CGContextBeginPath(_bitmap.ContextHandle);
         CoreTextNative.CGContextAddRect(_bitmap.ContextHandle, new CoreTextNative.CGRect(transformedClip.X, transformedClip.Y, transformedClip.Width, transformedClip.Height));
@@ -279,10 +305,9 @@ internal sealed class CoreTextDrawingContextImpl : IDrawingContextImpl, IDrawing
 
     public void PushLayer(Rect bounds)
     {
-        PushIsolatedLayer(layer =>
+        PushIsolatedLayer(bounds, layer =>
         {
             CompositeBitmapOntoCurrent(layer);
-            layer.Dispose();
         });
     }
 
@@ -294,11 +319,10 @@ internal sealed class CoreTextDrawingContextImpl : IDrawingContextImpl, IDrawing
         var combinedOpacity = Math.Clamp(_opacity * opacity, 0, 1);
         _opacity = 1;
 
-        PushIsolatedLayer(layer =>
+        PushIsolatedLayer(bounds ?? new Rect(GetBitmapLogicalSize(_bitmap)), layer =>
         {
-            CoreTextBitmapOperations.MultiplyAlphaInPlace(layer, combinedOpacity);
+            CoreTextBitmapOperations.MultiplyAlphaInPlace(layer.Bitmap, combinedOpacity);
             CompositeBitmapOntoCurrent(layer);
-            layer.Dispose();
         });
     }
 
@@ -314,18 +338,17 @@ internal sealed class CoreTextDrawingContextImpl : IDrawingContextImpl, IDrawing
     public void PushOpacityMask(IBrush mask, Rect bounds)
     {
         var maskTransform = Transform;
-        PushIsolatedLayer(layer =>
+        var maskBounds = bounds.TransformToAABB(maskTransform);
+        PushIsolatedLayer(maskBounds, layer =>
         {
-            using var maskBitmap = CreateCompatibleBitmap();
-            using (var maskContext = CreateChildContext(maskBitmap))
+            using var maskBitmap = CreateCompatibleBitmap(maskBounds);
+            using (var maskContext = CreateChildContext(maskBitmap, maskTransform))
             {
-                maskContext.Transform = maskTransform;
                 maskContext.DrawRectangle(mask, null, new RoundedRect(bounds));
             }
 
-            CoreTextBitmapOperations.MultiplyAlphaInPlace(layer, maskBitmap);
+            CoreTextBitmapOperations.MultiplyAlphaInPlace(layer.Bitmap, maskBitmap.Bitmap);
             CompositeBitmapOntoCurrent(layer);
-            layer.Dispose();
         });
     }
 
@@ -341,12 +364,12 @@ internal sealed class CoreTextDrawingContextImpl : IDrawingContextImpl, IDrawing
         if (coreGeometry is CoreTextGeometryImpl.CombinedGeometry combined)
         {
             var clipTransform = Transform;
-            PushIsolatedLayer(layer =>
+            var clipBounds = combined.Bounds.TransformToAABB(clipTransform);
+            PushIsolatedLayer(clipBounds, layer =>
             {
-                using var maskBitmap = CreateCombinedMask(combined, pen: null, fill: true, clipTransform);
-                CoreTextBitmapOperations.MultiplyAlphaInPlace(layer, maskBitmap);
+                using var maskBitmap = CreateCombinedMask(combined, pen: null, fill: true, clipTransform, clipBounds);
+                CoreTextBitmapOperations.MultiplyAlphaInPlace(layer.Bitmap, maskBitmap.Bitmap);
                 CompositeBitmapOntoCurrent(layer);
-                layer.Dispose();
             });
             return;
         }
@@ -403,12 +426,19 @@ internal sealed class CoreTextDrawingContextImpl : IDrawingContextImpl, IDrawing
     public void PushEffect(Rect? clipRect, IEffect effect)
     {
         var effectTransform = Transform;
-        PushIsolatedLayer(layer =>
-        {
-            using var output = ApplyEffect(layer, effect, clipRect, effectTransform);
-            CompositeBitmapOntoCurrent(output);
-            layer.Dispose();
-        });
+        var effectBounds = GetEffectBounds(clipRect, effect, effectTransform);
+        PushIsolatedLayer(
+            effectBounds,
+            enableFontSmoothing: false,
+            enableSubpixelPositioning: false,
+            layer =>
+            {
+                Rect? localClipRect = clipRect.HasValue
+                    ? TranslateToRegion(clipRect.Value.TransformToAABB(effectTransform), layer.LogicalBounds)
+                    : null;
+                using var output = ApplyEffect(layer.Bitmap, effect, localClipRect, Matrix.Identity);
+                CompositeBitmapOntoCurrent(output, layer.PixelOffset);
+            });
     }
 
     public void PopEffect() => PopState();
@@ -453,12 +483,18 @@ internal sealed class CoreTextDrawingContextImpl : IDrawingContextImpl, IDrawing
 
     private void ApplyTransform()
     {
-        if (Transform == Matrix.Identity)
+        var transform = Transform;
+        if (_surfaceOrigin != default)
+        {
+            transform *= Matrix.CreateTranslation(-_surfaceOrigin.X, -_surfaceOrigin.Y);
+        }
+
+        if (transform == Matrix.Identity)
         {
             return;
         }
 
-        CoreTextNative.CGContextConcatCTM(_bitmap.ContextHandle, CoreTextNative.CGAffineTransform.FromMatrix(Transform));
+        CoreTextNative.CGContextConcatCTM(_bitmap.ContextHandle, CoreTextNative.CGAffineTransform.FromMatrix(transform));
     }
 
     private void ConfigureAntialiasing()
@@ -546,47 +582,46 @@ internal sealed class CoreTextDrawingContextImpl : IDrawingContextImpl, IDrawing
 
         if (brush is not null)
         {
-            using var fillMask = CreateCombinedMask(combined, pen: null, fill: true, Transform);
-            using var fillBitmap = CreateCompatibleBitmap();
-            using (var fillContext = CreateChildContext(fillBitmap))
+            var fillBounds = combined.Bounds.TransformToAABB(Transform);
+            using var fillMask = CreateCombinedMask(combined, pen: null, fill: true, Transform, fillBounds);
+            using var fillBitmap = CreateCompatibleBitmap(fillBounds);
+            using (var fillContext = CreateChildContext(fillBitmap, Transform))
             {
-                fillContext.Transform = Transform;
                 fillContext.DrawRectangle(brush, null, new RoundedRect(combined.Bounds));
             }
 
-            CoreTextBitmapOperations.MultiplyAlphaInPlace(fillBitmap, fillMask);
+            CoreTextBitmapOperations.MultiplyAlphaInPlace(fillBitmap.Bitmap, fillMask.Bitmap);
             CompositeBitmapOntoCurrent(fillBitmap);
         }
 
         if (pen?.Brush is not null)
         {
-            using var strokeMask = CreateCombinedMask(combined, pen, fill: false, Transform);
             var strokeBounds = combined.Bounds.Inflate(new Thickness(pen.Thickness / 2));
-            using var strokeBitmap = CreateCompatibleBitmap();
-            using (var strokeContext = CreateChildContext(strokeBitmap))
+            var transformedStrokeBounds = strokeBounds.TransformToAABB(Transform);
+            using var strokeMask = CreateCombinedMask(combined, pen, fill: false, Transform, transformedStrokeBounds);
+            using var strokeBitmap = CreateCompatibleBitmap(transformedStrokeBounds);
+            using (var strokeContext = CreateChildContext(strokeBitmap, Transform))
             {
-                strokeContext.Transform = Transform;
                 strokeContext.DrawRectangle(pen.Brush, null, new RoundedRect(strokeBounds));
             }
 
-            CoreTextBitmapOperations.MultiplyAlphaInPlace(strokeBitmap, strokeMask);
+            CoreTextBitmapOperations.MultiplyAlphaInPlace(strokeBitmap.Bitmap, strokeMask.Bitmap);
             CompositeBitmapOntoCurrent(strokeBitmap);
         }
     }
 
-    private CoreTextBitmapImpl CreateCombinedMask(CoreTextGeometryImpl.CombinedGeometry combined, IPen? pen, bool fill, Matrix transform)
+    private BitmapRegion CreateCombinedMask(CoreTextGeometryImpl.CombinedGeometry combined, IPen? pen, bool fill, Matrix transform, Rect logicalBounds)
     {
-        var leftMask = RenderGeometryMask(combined.Left, pen, fill, transform);
-        using var rightMask = RenderGeometryMask(combined.Right, pen, fill, transform);
-        CoreTextBitmapOperations.CombineMasksInPlace(leftMask, rightMask, combined.CombineMode);
+        var leftMask = RenderGeometryMask(combined.Left, pen, fill, transform, logicalBounds);
+        using var rightMask = RenderGeometryMask(combined.Right, pen, fill, transform, logicalBounds);
+        CoreTextBitmapOperations.CombineMasksInPlace(leftMask.Bitmap, rightMask.Bitmap, combined.CombineMode);
         return leftMask;
     }
 
-    private CoreTextBitmapImpl RenderGeometryMask(CoreTextGeometryImpl geometry, IPen? pen, bool fill, Matrix transform)
+    private BitmapRegion RenderGeometryMask(CoreTextGeometryImpl geometry, IPen? pen, bool fill, Matrix transform, Rect logicalBounds)
     {
-        var mask = CreateCompatibleBitmap();
-        using var maskContext = CreateChildContext(mask);
-        maskContext.Transform = transform;
+        var mask = CreateCompatibleBitmap(logicalBounds);
+        using var maskContext = CreateChildContext(mask, transform);
         if (fill)
         {
             maskContext.DrawGeometry(Brushes.White, null, geometry);
@@ -603,6 +638,46 @@ internal sealed class CoreTextDrawingContextImpl : IDrawingContextImpl, IDrawing
         new Pen(Brushes.White, pen.Thickness, pen.DashStyle, pen.LineCap, pen.LineJoin, pen.MiterLimit);
 
     private CoreTextBitmapImpl CreateCompatibleBitmap() => CreateCompatibleBitmap(GetBitmapLogicalSize(_bitmap));
+
+    private BitmapRegion CreateCompatibleBitmap(
+        Rect logicalBounds,
+        bool? enableFontSmoothing = null,
+        bool? enableSubpixelPositioning = null)
+    {
+        var scale = GetBitmapScale(_bitmap);
+        var surfaceBounds = new Rect(GetBitmapLogicalSize(_bitmap));
+        var clamped = logicalBounds.Intersect(surfaceBounds);
+        if (clamped.Width <= 0 || clamped.Height <= 0)
+        {
+            clamped = new Rect(surfaceBounds.X, surfaceBounds.Y, 1 / scale.X, 1 / scale.Y);
+        }
+
+        var left = (int)Math.Floor(clamped.X * scale.X);
+        var top = (int)Math.Floor(clamped.Y * scale.Y);
+        var right = Math.Max(left + 1, (int)Math.Ceiling(clamped.Right * scale.X));
+        var bottom = Math.Max(top + 1, (int)Math.Ceiling(clamped.Bottom * scale.Y));
+        var pixelSize = new PixelSize(right - left, bottom - top);
+        var actualBounds = new Rect(
+            left / scale.X,
+            top / scale.Y,
+            pixelSize.Width / scale.X,
+            pixelSize.Height / scale.Y);
+
+        var bitmap = new CoreTextBitmapImpl(
+            pixelSize,
+            _bitmap.Dpi,
+            _bitmap.Format ?? PixelFormats.Bgra8888,
+            _bitmap.AlphaFormat ?? AlphaFormat.Premul,
+            scaleDrawingToDpiOnCreateDrawingContext: _scaleDrawingToDpi,
+            enableFontSmoothing: enableFontSmoothing ?? _enableFontSmoothing,
+            enableSubpixelPositioning: enableSubpixelPositioning ?? _enableSubpixelPositioning,
+            enableEffects: _enableEffects,
+            coreImageContext: _bitmap.CoreImageContext);
+        InitializeBitmapContext(bitmap);
+        var bitmapLogicalSize = GetBitmapLogicalSize(bitmap);
+        CoreTextNative.CGContextClearRect(bitmap.ContextHandle, new CoreTextNative.CGRect(0, 0, bitmapLogicalSize.Width, bitmapLogicalSize.Height));
+        return new BitmapRegion(bitmap, actualBounds, new PixelPoint(left, top));
+    }
 
     private CoreTextBitmapImpl CreateCompatibleBitmap(Size logicalSize)
     {
@@ -627,6 +702,20 @@ internal sealed class CoreTextDrawingContextImpl : IDrawingContextImpl, IDrawing
         return bitmap;
     }
 
+    private CoreTextDrawingContextImpl CreateChildContext(BitmapRegion region, Matrix transform)
+    {
+        var context = new CoreTextDrawingContextImpl(
+            region.Bitmap,
+            scaleDrawingToDpi: _scaleDrawingToDpi,
+            enableFontSmoothing: _enableFontSmoothing,
+            enableSubpixelPositioning: _enableSubpixelPositioning,
+            enableEffects: _enableEffects,
+            initializeBitmapContext: false,
+            surfaceOrigin: region.LogicalBounds.Position);
+        context.Transform = transform;
+        return context;
+    }
+
     private CoreTextDrawingContextImpl CreateChildContext(CoreTextBitmapImpl bitmap) =>
         new(
             bitmap,
@@ -636,25 +725,58 @@ internal sealed class CoreTextDrawingContextImpl : IDrawingContextImpl, IDrawing
             enableEffects: _enableEffects,
             initializeBitmapContext: false);
 
-    private void PushIsolatedLayer(Action<CoreTextBitmapImpl> popAction)
+    private void PushIsolatedLayer(Rect logicalBounds, Action<BitmapRegion> popAction) =>
+        PushIsolatedLayer(
+            logicalBounds,
+            enableFontSmoothing: _enableFontSmoothing,
+            enableSubpixelPositioning: _enableSubpixelPositioning,
+            popAction);
+
+    private void PushIsolatedLayer(
+        Rect logicalBounds,
+        bool enableFontSmoothing,
+        bool enableSubpixelPositioning,
+        Action<BitmapRegion> popAction)
     {
         var parent = _bitmap;
-        var layer = CreateCompatibleBitmap();
+        var parentSurfaceOrigin = _surfaceOrigin;
+        var layer = CreateCompatibleBitmap(
+            logicalBounds,
+            enableFontSmoothing: enableFontSmoothing,
+            enableSubpixelPositioning: enableSubpixelPositioning);
 
         _statePops.Push(() =>
         {
-            var current = _bitmap;
-            CoreTextNative.CGContextRestoreGState(current.ContextHandle);
+            CoreTextNative.CGContextRestoreGState(layer.Bitmap.ContextHandle);
             _bitmap = parent;
-            popAction(current);
+            _surfaceOrigin = parentSurfaceOrigin;
+            try
+            {
+                popAction(layer);
+            }
+            finally
+            {
+                layer.Dispose();
+            }
         });
 
-        _bitmap = layer;
+        _bitmap = layer.Bitmap;
+        _surfaceOrigin = layer.LogicalBounds.Position;
     }
 
     private void CompositeBitmapOntoCurrent(CoreTextBitmapImpl source)
     {
         CoreTextBitmapOperations.CompositeSourceOver(_bitmap, source);
+    }
+
+    private void CompositeBitmapOntoCurrent(BitmapRegion source)
+    {
+        CoreTextBitmapOperations.CompositeSourceOver(_bitmap, source.Bitmap, source.PixelOffset);
+    }
+
+    private void CompositeBitmapOntoCurrent(CoreTextBitmapImpl source, PixelPoint pixelOffset)
+    {
+        CoreTextBitmapOperations.CompositeSourceOver(_bitmap, source, pixelOffset);
     }
 
     private void DrawBitmapCore(CoreTextBitmapImpl bitmap, double opacity, Rect sourceRect, Rect destRect, bool flipX = false, bool flipY = false, bool applyCurrentTransform = true)
@@ -786,21 +908,20 @@ internal sealed class CoreTextDrawingContextImpl : IDrawingContextImpl, IDrawing
 
         try
         {
-            using var strokeMask = CreateCompatibleBitmap();
-            using (var maskContext = CreateChildContext(strokeMask))
+            var strokeBounds = bounds.TransformToAABB(Transform);
+            using var strokeMask = CreateCompatibleBitmap(strokeBounds);
+            using (var maskContext = CreateChildContext(strokeMask, Transform))
             {
-                maskContext.Transform = Transform;
                 maskContext.DrawStrokedMaskPath(path, pen);
             }
 
-            using var strokeBitmap = CreateCompatibleBitmap();
-            using (var strokeContext = CreateChildContext(strokeBitmap))
+            using var strokeBitmap = CreateCompatibleBitmap(strokeBounds);
+            using (var strokeContext = CreateChildContext(strokeBitmap, Transform))
             {
-                strokeContext.Transform = Transform;
                 strokeContext.DrawRectangle(pen.Brush, null, new RoundedRect(bounds));
             }
 
-            CoreTextBitmapOperations.MultiplyAlphaInPlace(strokeBitmap, strokeMask);
+            CoreTextBitmapOperations.MultiplyAlphaInPlace(strokeBitmap.Bitmap, strokeMask.Bitmap);
             CompositeBitmapOntoCurrent(strokeBitmap);
         }
         finally
@@ -1020,6 +1141,7 @@ internal sealed class CoreTextDrawingContextImpl : IDrawingContextImpl, IDrawing
                 Matrix.CreateTranslation(-sourceRect.X, -sourceRect.Y) *
                 Matrix.CreateScale(scale) *
                 Matrix.CreateTranslation(translate);
+            tileContext.Transform = Transform;
             content.Render(tileContext, renderTransform);
         }
 
@@ -1310,65 +1432,77 @@ internal sealed class CoreTextDrawingContextImpl : IDrawingContextImpl, IDrawing
 
         if (clipRect.HasValue)
         {
-            using var clipMask = CreateRectMask(clipRect.Value, transform);
-            CoreTextBitmapOperations.MultiplyAlphaInPlace(output, clipMask);
+            using var clipMask = CreateRectMask(clipRect.Value, transform, new Rect(GetBitmapLogicalSize(output)));
+            CoreTextBitmapOperations.MultiplyAlphaInPlace(output, clipMask.Bitmap);
         }
 
         return output;
     }
-    private CoreTextBitmapImpl CreateRectangleShadow(RoundedRect rect, BoxShadow shadow)
+    private BitmapRegion CreateRectangleShadow(RoundedRect rect, BoxShadow shadow)
     {
+        var shadowBounds = shadow.IsInset
+            ? rect.Rect.TransformToAABB(Transform)
+            : shadow.TransformBounds(rect.Rect).TransformToAABB(Transform);
+
         if (shadow.IsInset)
         {
-            using var originalMask = RenderRoundedRectMask(rect, Transform);
-            var mask = CoreTextBitmapOperations.Clone(originalMask);
+            using var originalMask = RenderRoundedRectMask(rect, Transform, shadowBounds);
+            var mask = CoreTextBitmapOperations.Clone(originalMask.Bitmap);
             using var holeMask = RenderRoundedRectMask(
                 rect.Deflate(shadow.Spread, shadow.Spread),
-                Transform * Matrix.CreateTranslation(shadow.OffsetX, shadow.OffsetY));
-            CoreTextBitmapOperations.CombineMasksInPlace(mask, holeMask, GeometryCombineMode.Exclude);
+                Transform * Matrix.CreateTranslation(shadow.OffsetX, shadow.OffsetY),
+                shadowBounds);
+            CoreTextBitmapOperations.CombineMasksInPlace(mask, holeMask.Bitmap, GeometryCombineMode.Exclude);
             if (_enableEffects && shadow.Blur > 0)
             {
                 (_bitmap.CoreImageContext ?? CoreTextCoreImageContext.SharedSoftware)
                     .BlurInPlace(mask, GetEffectRadiusPixels(shadow.Blur));
             }
 
-            using var clipMask = RenderRoundedRectMask(rect, Transform);
-            CoreTextBitmapOperations.MultiplyAlphaInPlace(mask, clipMask);
+            using var clipMask = RenderRoundedRectMask(rect, Transform, shadowBounds);
+            CoreTextBitmapOperations.MultiplyAlphaInPlace(mask, clipMask.Bitmap);
             using (mask)
             {
-                return CoreTextBitmapOperations.CreateTintedFromAlphaMask(mask, shadow.Color, _opacity);
+                return new BitmapRegion(
+                    CoreTextBitmapOperations.CreateTintedFromAlphaMask(mask, shadow.Color, _opacity),
+                    originalMask.LogicalBounds,
+                    originalMask.PixelOffset);
             }
         }
 
+        using var outerClipMask = RenderRoundedRectMask(rect, Transform, shadowBounds);
         var outsetMask = RenderRoundedRectMask(
             rect.Inflate(shadow.Spread, shadow.Spread),
-            Transform * Matrix.CreateTranslation(shadow.OffsetX, shadow.OffsetY));
+            Transform * Matrix.CreateTranslation(shadow.OffsetX, shadow.OffsetY),
+            shadowBounds);
         if (_enableEffects && shadow.Blur > 0)
         {
             (_bitmap.CoreImageContext ?? CoreTextCoreImageContext.SharedSoftware)
-                .BlurInPlace(outsetMask, GetEffectRadiusPixels(shadow.Blur));
+                .BlurInPlace(outsetMask.Bitmap, GetEffectRadiusPixels(shadow.Blur));
         }
 
+        CoreTextBitmapOperations.CombineMasksInPlace(outsetMask.Bitmap, outerClipMask.Bitmap, GeometryCombineMode.Exclude);
         using (outsetMask)
         {
-            return CoreTextBitmapOperations.CreateTintedFromAlphaMask(outsetMask, shadow.Color, _opacity);
+            return new BitmapRegion(
+                CoreTextBitmapOperations.CreateTintedFromAlphaMask(outsetMask.Bitmap, shadow.Color, _opacity),
+                outerClipMask.LogicalBounds,
+                outerClipMask.PixelOffset);
         }
     }
 
-    private CoreTextBitmapImpl RenderRoundedRectMask(RoundedRect rect, Matrix transform)
+    private BitmapRegion RenderRoundedRectMask(RoundedRect rect, Matrix transform, Rect logicalBounds)
     {
-        var mask = CreateCompatibleBitmap();
-        using var maskContext = CreateChildContext(mask);
-        maskContext.Transform = transform;
+        var mask = CreateCompatibleBitmap(logicalBounds);
+        using var maskContext = CreateChildContext(mask, transform);
         maskContext.DrawRectangle(Brushes.White, null, rect);
         return mask;
     }
 
-    private CoreTextBitmapImpl CreateRectMask(Rect rect, Matrix transform)
+    private BitmapRegion CreateRectMask(Rect rect, Matrix transform, Rect logicalBounds)
     {
-        var mask = CreateCompatibleBitmap();
-        using var maskContext = CreateChildContext(mask);
-        maskContext.Transform = transform;
+        var mask = CreateCompatibleBitmap(logicalBounds);
+        using var maskContext = CreateChildContext(mask, transform);
         maskContext.DrawRectangle(Brushes.White, null, new RoundedRect(rect));
         return mask;
     }
@@ -1384,6 +1518,28 @@ internal sealed class CoreTextDrawingContextImpl : IDrawingContextImpl, IDrawing
         var averageScale = (scale.X + scale.Y) / 2;
         return Math.Max(1, (int)Math.Ceiling(radius * averageScale));
     }
+
+    private Rect GetEffectBounds(Rect? clipRect, IEffect effect, Matrix transform)
+    {
+        var bounds = (clipRect ?? new Rect(GetBitmapLogicalSize(_bitmap))).TransformToAABB(transform);
+        if (!_enableEffects)
+        {
+            return bounds;
+        }
+
+        return effect switch
+        {
+            IBlurEffect blur when blur.Radius > 0 => bounds.Inflate(blur.Radius * 2),
+            IDropShadowEffect drop => bounds.Union(
+                bounds
+                    .Translate(new Vector(drop.OffsetX, drop.OffsetY))
+                    .Inflate(GetEffectRadiusPixels(drop.BlurRadius))),
+            _ => bounds
+        };
+    }
+
+    private static Rect TranslateToRegion(Rect rect, Rect regionBounds) =>
+        rect.Translate(new Vector(-regionBounds.X, -regionBounds.Y));
 
     private static void CompositeInto(CoreTextBitmapImpl destination, CoreTextBitmapImpl source)
     {

@@ -91,6 +91,35 @@ internal static class CoreTextBitmapOperations
         }
     }
 
+    public static void CompositeSourceOver(CoreTextBitmapImpl destination, CoreTextBitmapImpl source, PixelPoint offset)
+    {
+        unsafe
+        {
+            for (var y = 0; y < source.PixelSize.Height; y++)
+            {
+                var destinationY = y + offset.Y;
+                if ((uint)destinationY >= (uint)destination.PixelSize.Height)
+                {
+                    continue;
+                }
+
+                var sourceRow = (uint*)(source.DataAddress + (y * source.RowBytes));
+                var destinationRow = (uint*)(destination.DataAddress + (destinationY * destination.RowBytes));
+
+                for (var x = 0; x < source.PixelSize.Width; x++)
+                {
+                    var destinationX = x + offset.X;
+                    if ((uint)destinationX >= (uint)destination.PixelSize.Width)
+                    {
+                        continue;
+                    }
+
+                    destinationRow[destinationX] = CompositeSourceOver(destinationRow[destinationX], sourceRow[x]);
+                }
+            }
+        }
+    }
+
     public static void BoxBlurInPlace(CoreTextBitmapImpl bitmap, int radius)
     {
         if (radius <= 0)

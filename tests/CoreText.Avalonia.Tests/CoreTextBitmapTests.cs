@@ -175,6 +175,34 @@ public sealed class CoreTextBitmapTests
     }
 
     [Fact]
+    public void RectClipInsideEffectLayerUsesLayerLocalCoordinates()
+    {
+        using var bitmap = new CoreText.Avalonia.CoreTextBitmapImpl(
+            new PixelSize(320, 200),
+            new Vector(96, 96),
+            PixelFormats.Bgra8888,
+            AlphaFormat.Premul);
+
+        using (var context = new CoreText.Avalonia.CoreTextDrawingContextImpl(bitmap, scaleDrawingToDpi: false))
+        {
+            context.Clear(Colors.Transparent);
+            context.PushEffect(new Rect(96, 24, 128, 96), new BlurEffect { Radius = 0 });
+            context.PushClip(new Rect(112, 40, 64, 40));
+            context.DrawRectangle(new SolidColorBrush(Colors.Red), null, new RoundedRect(new Rect(96, 24, 128, 96)));
+            context.PopClip();
+            context.PopEffect();
+        }
+
+        using var framebuffer = bitmap.Lock();
+        var stride = framebuffer.RowBytes / 4;
+
+        Assert.True(IsRed(ReadPixel(framebuffer.Address, stride, 120, 48)));
+        Assert.True(IsRed(ReadPixel(framebuffer.Address, stride, 172, 72)));
+        Assert.False(IsRed(ReadPixel(framebuffer.Address, stride, 104, 48)));
+        Assert.False(IsRed(ReadPixel(framebuffer.Address, stride, 188, 88)));
+    }
+
+    [Fact]
     public void OpacityMaskModulatesRenderedAlpha()
     {
         using var bitmap = new CoreText.Avalonia.CoreTextBitmapImpl(
@@ -497,6 +525,39 @@ public sealed class CoreTextBitmapTests
         Assert.True(IsWhite(ReadPixel(framebuffer.Address, stride, 30, 30)));
         Assert.True(GetAlpha(ReadPixel(framebuffer.Address, stride, 66, 30)) > 0);
         Assert.True(IsDark(ReadPixel(framebuffer.Address, stride, 66, 30)));
+    }
+
+    [Fact]
+    public void BlurredOutsetBoxShadowDoesNotDarkenInterior()
+    {
+        using var bitmap = new CoreText.Avalonia.CoreTextBitmapImpl(
+            new PixelSize(220, 160),
+            new Vector(96, 96),
+            PixelFormats.Bgra8888,
+            AlphaFormat.Premul);
+
+        using (var context = new CoreText.Avalonia.CoreTextDrawingContextImpl(bitmap, scaleDrawingToDpi: false))
+        {
+            context.Clear(Colors.Transparent);
+            context.DrawRectangle(
+                Brushes.White,
+                null,
+                new RoundedRect(new Rect(40, 30, 100, 70), 14, 14),
+                new BoxShadows(new BoxShadow
+                {
+                    OffsetX = 0,
+                    OffsetY = 10,
+                    Blur = 16,
+                    Color = Color.FromArgb(90, 20, 60, 90)
+                }));
+        }
+
+        using var framebuffer = bitmap.Lock();
+        var stride = framebuffer.RowBytes / 4;
+
+        Assert.True(IsWhite(ReadPixel(framebuffer.Address, stride, 90, 70)));
+        Assert.True(GetAlpha(ReadPixel(framebuffer.Address, stride, 90, 120)) > 0);
+        Assert.True(IsDark(ReadPixel(framebuffer.Address, stride, 90, 120)));
     }
 
     [Fact]

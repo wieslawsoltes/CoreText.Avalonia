@@ -18,6 +18,8 @@ internal sealed class MainWindow : Window
         Background = new SolidColorBrush(Color.Parse("#EAF2F8"));
 
         var sampleBitmap = SampleBitmapFactory.Create();
+        Closed += (_, _) => sampleBitmap.Dispose();
+
         var renderGallery = new RenderGalleryControl(sampleBitmap)
         {
             ClipToBounds = true,

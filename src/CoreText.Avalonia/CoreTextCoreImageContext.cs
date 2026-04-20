@@ -12,6 +12,7 @@ internal sealed class CoreTextCoreImageContext : IDisposable
     private const string LibObjCLibrary = "/usr/lib/libobjc.A.dylib";
     private const uint Utf8Encoding = 0x08000100;
     private const int CfNumberDoubleType = 13;
+    private static readonly IntPtr s_coreFoundationHandle = NativeLibrary.Load(CoreFoundationLibrary);
 
     private static readonly Lazy<CoreTextCoreImageContext> s_sharedSoftware = new(static () => new(IntPtr.Zero));
     private static readonly ConcurrentDictionary<nint, CoreTextCoreImageContext> s_metalContexts = new();
@@ -29,6 +30,8 @@ internal sealed class CoreTextCoreImageContext : IDisposable
     private static readonly IntPtr s_selOutputImage = GetRequiredSelector("outputImage");
     private static readonly IntPtr s_selCreateCgImageFromRect = GetRequiredSelector("createCGImage:fromRect:");
     private static readonly IntPtr s_selOutputImageMaximumSize = GetRequiredSelector("outputImageMaximumSize");
+    private static readonly IntPtr s_selClearCaches = GetRequiredSelector("clearCaches");
+    private static readonly IntPtr s_selReclaimResources = GetRequiredSelector("reclaimResources");
     private static readonly IntPtr s_selImageByCroppingToRect = GetRequiredSelector("imageByCroppingToRect:");
     private static readonly IntPtr s_selImageByApplyingTransform = GetRequiredSelector("imageByApplyingTransform:");
     private static readonly IntPtr s_selVectorWithXYZW = GetRequiredSelector("vectorWithX:Y:Z:W:");
@@ -44,6 +47,10 @@ internal sealed class CoreTextCoreImageContext : IDisposable
     private static readonly IntPtr s_keyInputAVector = CreateConstantString("inputAVector");
     private static readonly IntPtr s_keyInputBiasVector = CreateConstantString("inputBiasVector");
     private static readonly IntPtr s_keyInputBackgroundImage = CreateConstantString("inputBackgroundImage");
+    private static readonly IntPtr s_optionCacheIntermediates = CreateConstantString("kCIContextCacheIntermediates");
+    private static readonly IntPtr s_optionPriorityRequestLow = CreateConstantString("kCIContextPriorityRequestLow");
+    private static readonly IntPtr s_cfBooleanFalse = ReadConstantPointer("kCFBooleanFalse");
+    private static readonly IntPtr s_cfBooleanTrue = ReadConstantPointer("kCFBooleanTrue");
 
     private readonly IntPtr _context;
     private readonly CGColorSpace _colorSpace;
@@ -56,9 +63,21 @@ internal sealed class CoreTextCoreImageContext : IDisposable
         _colorSpace = CGColorSpace.CreateDeviceRGB();
 
         using var pool = new AutoreleasePool();
-        var context = metalDeviceHandle == IntPtr.Zero
-            ? IntPtr_objc_msgSend_IntPtr(s_ciContextClass, s_selContextWithOptions, IntPtr.Zero)
-            : IntPtr_objc_msgSend_IntPtr_IntPtr(s_ciContextClass, s_selContextWithMtlDeviceOptions, metalDeviceHandle, IntPtr.Zero);
+        var options = CreateContextOptions();
+        IntPtr context;
+        try
+        {
+            context = metalDeviceHandle == IntPtr.Zero
+                ? IntPtr_objc_msgSend_IntPtr(s_ciContextClass, s_selContextWithOptions, options)
+                : IntPtr_objc_msgSend_IntPtr_IntPtr(s_ciContextClass, s_selContextWithMtlDeviceOptions, metalDeviceHandle, options);
+        }
+        finally
+        {
+            if (options != IntPtr.Zero)
+            {
+                CFRelease(options);
+            }
+        }
 
         if (context == IntPtr.Zero)
         {
@@ -124,6 +143,8 @@ internal sealed class CoreTextCoreImageContext : IDisposable
     {
         if (_context != IntPtr.Zero)
         {
+            void_objc_msgSend(_context, s_selClearCaches);
+            void_objc_msgSend(_context, s_selReclaimResources);
             objc_release(_context);
         }
 
@@ -232,6 +253,8 @@ internal sealed class CoreTextCoreImageContext : IDisposable
                 new CoreTextNative.CGRect(0, 0, output.PixelSize.Width, output.PixelSize.Height),
                 cgImage);
             output.IncrementVersion();
+            void_objc_msgSend(_context, s_selClearCaches);
+            void_objc_msgSend(_context, s_selReclaimResources);
         }
         finally
         {
@@ -296,6 +319,19 @@ internal sealed class CoreTextCoreImageContext : IDisposable
             Math.Max(1, (int)Math.Floor(size.Height)));
     }
 
+    private static IntPtr CreateContextOptions()
+    {
+        var keys = new[] { s_optionCacheIntermediates, s_optionPriorityRequestLow };
+        var values = new[] { s_cfBooleanFalse, s_cfBooleanTrue };
+        return CFDictionaryCreate(IntPtr.Zero, keys, values, (nint)keys.Length, IntPtr.Zero, IntPtr.Zero);
+    }
+
+    private static IntPtr ReadConstantPointer(string symbol)
+    {
+        var export = NativeLibrary.GetExport(s_coreFoundationHandle, symbol);
+        return Marshal.ReadIntPtr(export);
+    }
+
     private readonly struct AutoreleasePool : IDisposable
     {
         private readonly IntPtr _handle;
@@ -339,10 +375,16 @@ internal sealed class CoreTextCoreImageContext : IDisposable
     private static extern IntPtr CFNumberCreate(IntPtr allocator, int numberType, ref double value);
 
     [DllImport(CoreFoundationLibrary)]
+    private static extern IntPtr CFDictionaryCreate(IntPtr allocator, IntPtr[] keys, IntPtr[] values, nint numValues, IntPtr keyCallbacks, IntPtr valueCallbacks);
+
+    [DllImport(CoreFoundationLibrary)]
     private static extern void CFRelease(IntPtr handle);
 
     [DllImport(LibObjCLibrary, EntryPoint = "objc_msgSend")]
     private static extern IntPtr IntPtr_objc_msgSend(IntPtr receiver, IntPtr selector);
+
+    [DllImport(LibObjCLibrary, EntryPoint = "objc_msgSend")]
+    private static extern void void_objc_msgSend(IntPtr receiver, IntPtr selector);
 
     [DllImport(LibObjCLibrary, EntryPoint = "objc_msgSend")]
     private static extern CGSize CGSize_objc_msgSend(IntPtr receiver, IntPtr selector);
