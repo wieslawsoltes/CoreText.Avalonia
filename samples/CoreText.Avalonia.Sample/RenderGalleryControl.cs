@@ -33,9 +33,9 @@ internal sealed class RenderGalleryControl : Control
             return;
         }
 
-        var surfaceFill = new SolidColorBrush(Color.Parse("#EEF5F9"));
+        var surfaceFill = new SolidColorBrush(Color.Parse("#FBFDFE"));
         var cardFill = Brushes.White;
-        var panelStroke = new Pen(new SolidColorBrush(Color.Parse("#D9E4EE")), 1);
+        var panelStroke = new Pen(new SolidColorBrush(Color.Parse("#D7E2EC")), 1);
         var headingBrush = new SolidColorBrush(Color.Parse("#17324D"));
         var bodyBrush = new SolidColorBrush(Color.Parse("#5B7083"));
         var accentBrush = new SolidColorBrush(Color.Parse("#0E7490"));
@@ -46,7 +46,7 @@ internal sealed class RenderGalleryControl : Control
         context.FillRectangle(surfaceFill, bounds);
         context.DrawRectangle(cardFill, panelStroke, surface, 18);
 
-        var inner = surface.Deflate(16);
+        var inner = surface.Deflate(12);
         switch (_scene)
         {
             case RenderGalleryScene.BrushesAndImages:
@@ -195,18 +195,18 @@ internal sealed class RenderGalleryControl : Control
             new BoxShadows(
                 new BoxShadow
                 {
-                    OffsetY = 14,
-                    Blur = 18,
-                    Color = Color.FromArgb(76, 17, 50, 77)
+                    OffsetY = 10,
+                    Blur = 12,
+                    Color = Color.FromArgb(52, 17, 50, 77)
                 },
                 new[]
                 {
                     new BoxShadow
                     {
-                        OffsetX = 10,
+                        OffsetX = 8,
                         OffsetY = 0,
-                        Blur = 10,
-                        Color = Color.FromArgb(42, 14, 116, 144),
+                        Blur = 8,
+                        Color = Color.FromArgb(28, 14, 116, 144),
                         IsInset = true
                     }
                 }));
@@ -252,27 +252,10 @@ internal sealed class RenderGalleryControl : Control
         IBrush accentBrush,
         Pen panelStroke)
     {
-        var bannerRect = new Rect(rect.X, rect.Y, rect.Width, 92);
-        context.DrawRectangle(
-            new LinearGradientBrush
-            {
-                StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
-                EndPoint = new RelativePoint(1, 1, RelativeUnit.Relative),
-                GradientStops =
-                {
-                    new GradientStop(Color.Parse("#12344B"), 0.0),
-                    new GradientStop(Color.Parse("#0E7490"), 0.6),
-                    new GradientStop(Color.Parse("#7AA89A"), 1.0)
-                }
-            },
-            null,
-            bannerRect,
-            18,
-            18);
-        DrawFormattedText(context, new Point(bannerRect.X + 18, bannerRect.Y + 18), "FormattedText canvas", 24, Brushes.White, FontWeight.SemiBold);
-        DrawFormattedText(context, new Point(bannerRect.X + 18, bannerRect.Y + 54), "Hierarchy, contrast, and utility labels are rendered through DrawText.", 14, Brushes.White);
+        DrawFormattedText(context, new Point(rect.X + 2, rect.Y + 2), "FormattedText canvas", 24, headingBrush, FontWeight.SemiBold);
+        DrawFormattedText(context, new Point(rect.X + 2, rect.Y + 40), "Hierarchy, contrast, and utility labels are rendered on neutral panels through DrawText.", 14, bodyBrush);
 
-        var lowerRect = new Rect(rect.X, bannerRect.Bottom + 16, rect.Width, rect.Bottom - bannerRect.Bottom - 16);
+        var lowerRect = new Rect(rect.X, rect.Y + 76, rect.Width, rect.Height - 76);
         var panels = CreatePanelGrid(lowerRect, 2, 1, 16);
 
         var hierarchyContent = DrawPanelChrome(context, panels[0], "Hierarchy", accentBrush, panelStroke);
