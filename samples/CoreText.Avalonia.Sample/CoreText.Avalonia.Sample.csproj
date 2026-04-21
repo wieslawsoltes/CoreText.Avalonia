@@ -11,12 +11,12 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\CoreText.Avalonia\CoreText.Avalonia.csproj" />
     <ProjectReference Include="..\..\src\CoreText.Avalonia.Native\CoreText.Avalonia.Native.csproj" />
+    <ProjectReference Include="..\..\src\MacOS.Avalonia\MacOS.Avalonia.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Avalonia" />
     <PackageReference Include="Avalonia.Fonts.Inter" />
-    <PackageReference Include="Avalonia.Native" />
     <PackageReference Include="Avalonia.Themes.Fluent" />
   </ItemGroup>
 </Project>

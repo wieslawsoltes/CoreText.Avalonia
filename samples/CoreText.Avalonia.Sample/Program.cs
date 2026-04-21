@@ -1,4 +1,5 @@
 using Avalonia;
+using MacOS.Avalonia;
 
 namespace CoreText.Avalonia.Sample;
 
@@ -19,13 +20,13 @@ internal static class Program
             SurfaceMode = SurfaceMode
         };
 
-        var nativeOptions = new AvaloniaNativePlatformOptions
+        var nativeOptions = new MacOSPlatformOptions
         {
-            RenderingMode = SurfaceMode switch
+            RenderingModes = SurfaceMode switch
             {
-                CoreTextSurfaceMode.Software => new[] { AvaloniaNativeRenderingMode.Software },
-                CoreTextSurfaceMode.Metal => new[] { AvaloniaNativeRenderingMode.Metal, AvaloniaNativeRenderingMode.Software },
-                _ => new[] { AvaloniaNativeRenderingMode.Metal, AvaloniaNativeRenderingMode.Software }
+                CoreTextSurfaceMode.Software => new[] { MacOSRenderingMode.Software },
+                CoreTextSurfaceMode.Metal => new[] { MacOSRenderingMode.Metal, MacOSRenderingMode.Software },
+                _ => new[] { MacOSRenderingMode.Metal, MacOSRenderingMode.OpenGl, MacOSRenderingMode.Software }
             }
         };
 
