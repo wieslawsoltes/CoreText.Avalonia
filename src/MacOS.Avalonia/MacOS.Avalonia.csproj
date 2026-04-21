@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-macos</TargetFramework>
+    <RootNamespace>MacOS.Avalonia</RootNamespace>
+    <IsPackable>true</IsPackable>
+    <PackageId>MacOS.Avalonia</PackageId>
+    <Title>MacOS.Avalonia</Title>
+    <Description>Standalone macOS windowing backend for Avalonia built on the net10.0-macos generated Apple API bindings.</Description>
+    <PackageTags>avalonia;macos;windowing;metal;opengl</PackageTags>
+    <AvaloniaAccessUnstablePrivateApis>true</AvaloniaAccessUnstablePrivateApis>
+    <Avalonia_I_Want_To_Use_Private_Apis_In_Nuget_Package_And_Promise_To_Pin_The_Exact_Avalonia_Version_In_Package_Dependency>true</Avalonia_I_Want_To_Use_Private_Apis_In_Nuget_Package_And_Promise_To_Pin_The_Exact_Avalonia_Version_In_Package_Dependency>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+  </ItemGroup>
+</Project>
