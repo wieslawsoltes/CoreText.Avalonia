@@ -52,6 +52,7 @@ public sealed class MacOSPlatform : IWindowingPlatform
             return s_instance;
         }
 
+        NSApplication.Init();
         var nativeApplication = NSApplication.SharedApplication;
         nativeApplication.ActivationPolicy = options.ShowInDock
             ? NSApplicationActivationPolicy.Regular
