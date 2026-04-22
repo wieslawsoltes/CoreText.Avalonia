@@ -20,7 +20,7 @@ internal static class Program
             SurfaceMode = SurfaceMode
         };
 
-        var nativeOptions = new MacOSPlatformOptions
+        var nativeOptions = new MacOS.Avalonia.MacOSPlatformOptions
         {
             RenderingModes = SurfaceMode switch
             {

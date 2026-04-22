@@ -9,19 +9,21 @@ internal sealed class MacOSMetalPlatformGraphics : IPlatformGraphics
 {
     private readonly IMTLDevice _device;
     private readonly IMTLCommandQueue _commandQueue;
+    private readonly MacOSMetalDevice _sharedContext;
 
     public MacOSMetalPlatformGraphics(IMTLDevice device)
     {
         _device = device;
         _commandQueue = _device.CreateCommandQueue()
             ?? throw new InvalidOperationException("Unable to create a Metal command queue.");
+        _sharedContext = new MacOSMetalDevice(_device, _commandQueue);
     }
 
-    public bool UsesSharedContext => false;
+    public bool UsesSharedContext => true;
 
     public IPlatformGraphicsContext CreateContext() => new MacOSMetalDevice(_device, _commandQueue);
 
-    public IPlatformGraphicsContext GetSharedContext() => throw new NotSupportedException();
+    public IPlatformGraphicsContext GetSharedContext() => _sharedContext;
 }
 
 internal sealed class MacOSMetalDevice(IMTLDevice device, IMTLCommandQueue commandQueue) : IMetalDevice

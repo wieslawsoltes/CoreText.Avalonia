@@ -51,11 +51,16 @@ internal sealed class MacOSApplicationDelegate : NSApplicationDelegate
 {
     private readonly MacOSPlatformLifetimeEvents _lifetimeEvents;
     private readonly MacOSActivatableLifetime _activatableLifetime;
+    private readonly MacOSDockMenuProvider _dockMenuProvider;
 
-    public MacOSApplicationDelegate(MacOSPlatformLifetimeEvents lifetimeEvents, MacOSActivatableLifetime activatableLifetime)
+    public MacOSApplicationDelegate(
+        MacOSPlatformLifetimeEvents lifetimeEvents,
+        MacOSActivatableLifetime activatableLifetime,
+        MacOSDockMenuProvider dockMenuProvider)
     {
         _lifetimeEvents = lifetimeEvents;
         _activatableLifetime = activatableLifetime;
+        _dockMenuProvider = dockMenuProvider;
     }
 
     public override NSApplicationTerminateReply ApplicationShouldTerminate(NSApplication sender)
@@ -69,6 +74,11 @@ internal sealed class MacOSApplicationDelegate : NSApplicationDelegate
     {
         _activatableLifetime.NotifyActivated(ActivationKind.Reopen);
         return true;
+    }
+
+    public override NSMenu ApplicationDockMenu(NSApplication sender)
+    {
+        return _dockMenuProvider.GetDockMenu()!;
     }
 
     public override void DidBecomeActive(NSNotification notification)

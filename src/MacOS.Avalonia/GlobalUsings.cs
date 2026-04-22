@@ -19,6 +19,7 @@ global using Avalonia.Input.Platform;
 global using Avalonia.Input.Raw;
 global using Avalonia.Media;
 global using Avalonia.Platform;
+global using Avalonia.Platform.Storage;
 global using Avalonia.Platform.Surfaces;
 global using Avalonia.Rendering;
 global using Avalonia.Rendering.Composition;

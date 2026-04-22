@@ -9,6 +9,8 @@ public sealed class MacOSPlatform : IWindowingPlatform
     private static MacOSPlatform? s_instance;
     private readonly List<MacOSWindowImpl> _windows = new();
     private readonly object _windowsSync = new();
+    private MacOSMainMenuManager? _mainMenuManager;
+    private MacOSDockMenuProvider? _dockMenuProvider;
     private NSObject? _screenParametersObserver;
 
     private MacOSPlatform(
@@ -43,6 +45,8 @@ public sealed class MacOSPlatform : IWindowingPlatform
     internal IPlatformGraphics? PlatformGraphics { get; }
 
     internal static Compositor Compositor { get; private set; } = null!;
+    internal MacOSMainMenuManager MainMenuManager => _mainMenuManager ?? throw new InvalidOperationException("Main menu manager is not initialized.");
+
 
     public static MacOSPlatform Initialize(MacOSPlatformOptions options)
     {
@@ -81,7 +85,7 @@ public sealed class MacOSPlatform : IWindowingPlatform
 
     public ITopLevelImpl CreateEmbeddableTopLevel() => throw new PlatformNotSupportedException();
 
-    public ITrayIconImpl? CreateTrayIcon() => null;
+    public ITrayIconImpl? CreateTrayIcon() => new MacOSTrayIconImpl();
 
     public void GetWindowsZOrder(ReadOnlySpan<IWindowImpl> windows, Span<long> zOrder)
     {
@@ -126,6 +130,9 @@ public sealed class MacOSPlatform : IWindowingPlatform
         var hotkeys = new PlatformHotkeyConfiguration(KeyModifiers.Meta, wholeWordTextActionModifiers: KeyModifiers.Alt);
         hotkeys.MoveCursorToTheStartOfLine.Add(new KeyGesture(Key.Left, hotkeys.CommandModifiers));
         hotkeys.MoveCursorToTheStartOfLineWithSelection.Add(new KeyGesture(Key.Left, hotkeys.CommandModifiers | hotkeys.SelectionModifiers));
+        var applicationCommands = new MacOSNativeApplicationCommands(NativeApplication);
+        _mainMenuManager = new MacOSMainMenuManager(NativeApplication, Options, applicationCommands);
+        _dockMenuProvider = new MacOSDockMenuProvider(Options);
         hotkeys.MoveCursorToTheEndOfLine.Add(new KeyGesture(Key.Right, hotkeys.CommandModifiers));
         hotkeys.MoveCursorToTheEndOfLineWithSelection.Add(new KeyGesture(Key.Right, hotkeys.CommandModifiers | hotkeys.SelectionModifiers));
         var keyGestureFormatInfo = new KeyGestureFormatInfo(
@@ -152,7 +159,7 @@ public sealed class MacOSPlatform : IWindowingPlatform
 
         if (!Options.DisableAvaloniaAppDelegate)
         {
-            NativeApplication.Delegate = new MacOSApplicationDelegate(LifetimeEvents, ActivatableLifetime);
+            NativeApplication.Delegate = new MacOSApplicationDelegate(LifetimeEvents, ActivatableLifetime, _dockMenuProvider);
         }
 
         AvaloniaLocator.CurrentMutable
@@ -160,6 +167,7 @@ public sealed class MacOSPlatform : IWindowingPlatform
             .Bind<IClipboard>().ToConstant(clipboard)
             .Bind<ICursorFactory>().ToConstant(new MacOSCursorFactory())
             .Bind<IScreenImpl>().ToConstant(Screens)
+            .Bind<IMountedVolumeInfoProvider>().ToConstant(new MacOSMountedVolumeInfoProvider())
             .Bind<IPlatformSettings>().ToConstant(new MacOSPlatformSettings())
             .Bind<IPlatformIconLoader>().ToSingleton<MacOSIconLoader>()
             .Bind<IKeyboardDevice>().ToConstant(KeyboardDevice)
