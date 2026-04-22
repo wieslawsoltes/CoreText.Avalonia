@@ -178,10 +178,16 @@ internal class MacOSWindowImpl : MacOSTopLevelImpl, IWindowImpl
 
     public void BeginMoveDrag(PointerPressedEventArgs e)
     {
+        var currentEvent = NSApplication.SharedApplication.CurrentEvent;
+        if (currentEvent is not null)
+        {
+            _window.PerformWindowDrag(currentEvent);
+        }
     }
 
     public void BeginResizeDrag(WindowEdge edge, PointerPressedEventArgs e)
     {
+        BeginMoveDrag(e);
     }
 
     public void Resize(Size clientSize, WindowResizeReason reason = WindowResizeReason.Application)
@@ -369,36 +375,5 @@ internal class MacOSWindowImpl : MacOSTopLevelImpl, IWindowImpl
         {
             _owner.HandleWindowStateChanged(WindowState.Normal);
         }
-    }
-}
-
-internal sealed class MacOSPopupImpl : MacOSWindowImpl, IPopupImpl
-{
-    private readonly MacOSWindowImpl _parent;
-
-    public MacOSPopupImpl(MacOSPlatform platform, MacOSPlatformOptions options, MacOSWindowImpl parent)
-        : base(platform, options, new NSPanel(
-            new CGRect(0, 0, 400, 300),
-            NSWindowStyle.Borderless,
-            NSBackingStore.Buffered,
-            false))
-    {
-        _parent = parent;
-        SetParent(parent);
-    }
-
-    public IPopupPositioner? PopupPositioner => null;
-
-    public void SetWindowManagerAddShadowHint(bool enabled)
-    {
-        if (NativeWindow is NSPanel panel)
-        {
-            panel.HasShadow = enabled;
-        }
-    }
-
-    public void TakeFocus()
-    {
-        _parent.Activate();
     }
 }

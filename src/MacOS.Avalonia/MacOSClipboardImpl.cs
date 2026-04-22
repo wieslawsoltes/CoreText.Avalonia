@@ -5,9 +5,53 @@ namespace MacOS.Avalonia;
 
 internal sealed class MacOSClipboardImpl : IClipboardImpl
 {
-    public Task<IAsyncDataTransfer?> TryGetDataAsync() => Task.FromResult<IAsyncDataTransfer?>(null);
+    public Task<IAsyncDataTransfer?> TryGetDataAsync()
+    {
+        var pasteboard = NSPasteboard.GeneralPasteboard;
+        var availableTypes = pasteboard.Types;
+        if (availableTypes is null || availableTypes.Length == 0)
+        {
+            return Task.FromResult<IAsyncDataTransfer?>(null);
+        }
 
-    public Task SetDataAsync(IAsyncDataTransfer dataTransfer) => Task.CompletedTask;
+        var dataTransfer = new DataTransfer();
+        var item = new DataTransferItem();
+
+        var text = pasteboard.GetStringForType(NSPasteboard.NSPasteboardTypeString);
+        if (!string.IsNullOrEmpty(text))
+        {
+            item.SetText(text);
+        }
+
+        if (item.Formats.Count == 0)
+        {
+            return Task.FromResult<IAsyncDataTransfer?>(null);
+        }
+
+        dataTransfer.Add(item);
+        return Task.FromResult<IAsyncDataTransfer?>(dataTransfer);
+    }
+
+    public async Task SetDataAsync(IAsyncDataTransfer dataTransfer)
+    {
+        var pasteboard = NSPasteboard.GeneralPasteboard;
+        pasteboard.ClearContents();
+
+        foreach (var item in dataTransfer.Items)
+        {
+            if (!item.Formats.Contains(DataFormat.Text))
+            {
+                continue;
+            }
+
+            var text = await item.TryGetTextAsync();
+            if (!string.IsNullOrEmpty(text))
+            {
+                pasteboard.SetStringForType(text, NSPasteboard.NSPasteboardTypeString);
+                return;
+            }
+        }
+    }
 
     public Task ClearAsync()
     {

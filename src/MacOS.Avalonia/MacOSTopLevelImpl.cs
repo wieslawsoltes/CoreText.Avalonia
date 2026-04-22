@@ -12,10 +12,13 @@ internal abstract class MacOSTopLevelImpl : ITopLevelImpl, IFramebufferPlatformS
     private readonly MacOSTopLevelHandle _handle;
     private readonly MacOSMetalPlatformSurface _metalSurface;
     private readonly MacOSGlPlatformSurface _glSurface;
+    private readonly MouseDevice _mouseDevice = new();
     private CGImage? _softwareFrame;
     private Size _clientSize;
     private double _renderScaling = 1;
     private WindowTransparencyLevel _transparencyLevel;
+    private RawInputModifiers _pointerButtonModifiers;
+    private RawInputModifiers _keyboardModifiers;
 
     protected MacOSTopLevelImpl(MacOSPlatform platform)
     {
@@ -207,6 +210,137 @@ internal abstract class MacOSTopLevelImpl : ITopLevelImpl, IFramebufferPlatformS
         }
     }
 
+    internal void HandlePointerEvent(NSEvent eventArgs, RawPointerEventType eventType)
+    {
+        if (InputRoot is null)
+        {
+            return;
+        }
+
+        UpdatePointerButtonModifiers(eventType);
+        Input?.Invoke(new RawPointerEventArgs(
+            _mouseDevice,
+            GetTimestamp(eventArgs),
+            InputRoot,
+            eventType,
+            GetClientPoint(eventArgs),
+            GetCurrentModifiers(eventArgs)));
+    }
+
+    internal void HandlePointerLeave(NSEvent eventArgs)
+    {
+        if (InputRoot is null)
+        {
+            return;
+        }
+
+        _pointerButtonModifiers = RawInputModifiers.None;
+        Input?.Invoke(new RawPointerEventArgs(
+            _mouseDevice,
+            GetTimestamp(eventArgs),
+            InputRoot,
+            RawPointerEventType.LeaveWindow,
+            GetClientPoint(eventArgs),
+            GetCurrentModifiers(eventArgs)));
+    }
+
+    internal void HandleMouseWheel(NSEvent eventArgs)
+    {
+        if (InputRoot is null)
+        {
+            return;
+        }
+
+        Input?.Invoke(new RawMouseWheelEventArgs(
+            _mouseDevice,
+            GetTimestamp(eventArgs),
+            InputRoot,
+            GetClientPoint(eventArgs),
+            new Vector(eventArgs.ScrollingDeltaX, eventArgs.ScrollingDeltaY),
+            GetCurrentModifiers(eventArgs)));
+    }
+
+    internal void HandleKeyEvent(NSEvent eventArgs, RawKeyEventType eventType)
+    {
+        if (InputRoot is null)
+        {
+            return;
+        }
+
+        Dispatcher.UIThread.RunJobs(DispatcherPriority.Input + 1);
+
+        var physicalKey = MacOSInputHelpers.ToPhysicalKey((ushort)eventArgs.KeyCode);
+        var modifiers = GetCurrentModifiers(eventArgs);
+        var key = MacOSInputHelpers.ToKey((ushort)eventArgs.KeyCode, eventArgs.CharactersIgnoringModifiers);
+        var keySymbol = MacOSInputHelpers.GetKeySymbol(eventArgs, physicalKey, modifiers);
+
+        var keyEvent = new RawKeyEventArgs(
+            Platform.KeyboardDevice,
+            GetTimestamp(eventArgs),
+            InputRoot,
+            eventType,
+            key,
+            modifiers,
+            physicalKey,
+            keySymbol);
+        Input?.Invoke(keyEvent);
+
+        if (eventType == RawKeyEventType.KeyDown
+            && !keyEvent.Handled
+            && !modifiers.HasFlag(RawInputModifiers.Control)
+            && !modifiers.HasFlag(RawInputModifiers.Meta))
+        {
+            var text = MacOSInputHelpers.GetText(eventArgs);
+            if (!string.IsNullOrEmpty(text))
+            {
+                Input?.Invoke(new RawTextInputEventArgs(
+                    Platform.KeyboardDevice,
+                    GetTimestamp(eventArgs),
+                    InputRoot,
+                    text));
+            }
+        }
+    }
+
+    internal void HandleFlagsChanged(NSEvent eventArgs)
+    {
+        if (InputRoot is null)
+        {
+            return;
+        }
+
+        var newModifiers = MacOSInputHelpers.ToRawInputModifiers(eventArgs.ModifierFlags);
+        var changedModifiers = _keyboardModifiers ^ newModifiers;
+        if (changedModifiers == RawInputModifiers.None)
+        {
+            _keyboardModifiers = newModifiers;
+            return;
+        }
+
+        _keyboardModifiers = newModifiers;
+        var physicalKey = MacOSInputHelpers.ToPhysicalKey((ushort)eventArgs.KeyCode);
+        if (physicalKey == PhysicalKey.None)
+        {
+            return;
+        }
+
+        Dispatcher.UIThread.RunJobs(DispatcherPriority.Input + 1);
+
+        var key = physicalKey.ToQwertyKey();
+        var keyEventType = IsModifierPressed(eventArgs, newModifiers, physicalKey)
+            ? RawKeyEventType.KeyDown
+            : RawKeyEventType.KeyUp;
+        Input?.Invoke(new RawKeyEventArgs(
+            Platform.KeyboardDevice,
+            GetTimestamp(eventArgs),
+            InputRoot,
+            keyEventType,
+            key,
+            GetCurrentModifiers(eventArgs),
+            physicalKey,
+            MacOSInputHelpers.GetKeySymbol(eventArgs, physicalKey, GetCurrentModifiers(eventArgs))));
+    }
+
     protected internal void Invalidate()
     {
         NativeView.NeedsDisplay = true;
@@ -258,6 +392,7 @@ internal abstract class MacOSTopLevelImpl : ITopLevelImpl, IFramebufferPlatformS
 
     internal void NotifyLostFocus()
     {
+        _pointerButtonModifiers = RawInputModifiers.None;
         LostFocus?.Invoke();
     }
 
@@ -277,6 +412,61 @@ internal abstract class MacOSTopLevelImpl : ITopLevelImpl, IFramebufferPlatformS
 
             context.DrawImage(new CGRect(0, 0, ClientSize.Width, ClientSize.Height), _softwareFrame);
         }
+    }
+
+    private ulong GetTimestamp(NSEvent? eventArgs)
+    {
+        return eventArgs is null ? 0UL : (ulong)Math.Max(0, eventArgs.Timestamp * 1000d);
+    }
+
+    private Point GetClientPoint(NSEvent eventArgs)
+    {
+        var clientPoint = NativeView.ConvertPointFromView(eventArgs.LocationInWindow, null);
+        return new Point(clientPoint.X, clientPoint.Y);
+    }
+
+    private RawInputModifiers GetCurrentModifiers(NSEvent eventArgs)
+    {
+        _keyboardModifiers = MacOSInputHelpers.ToRawInputModifiers(eventArgs.ModifierFlags);
+        return _keyboardModifiers | _pointerButtonModifiers;
+    }
+
+    private void UpdatePointerButtonModifiers(RawPointerEventType eventType)
+    {
+        switch (eventType)
+        {
+            case RawPointerEventType.LeftButtonDown:
+                _pointerButtonModifiers |= RawInputModifiers.LeftMouseButton;
+                break;
+            case RawPointerEventType.LeftButtonUp:
+                _pointerButtonModifiers &= ~RawInputModifiers.LeftMouseButton;
+                break;
+            case RawPointerEventType.RightButtonDown:
+                _pointerButtonModifiers |= RawInputModifiers.RightMouseButton;
+                break;
+            case RawPointerEventType.RightButtonUp:
+                _pointerButtonModifiers &= ~RawInputModifiers.RightMouseButton;
+                break;
+            case RawPointerEventType.MiddleButtonDown:
+                _pointerButtonModifiers |= RawInputModifiers.MiddleMouseButton;
+                break;
+            case RawPointerEventType.MiddleButtonUp:
+                _pointerButtonModifiers &= ~RawInputModifiers.MiddleMouseButton;
+                break;
+        }
+    }
+
+    private static bool IsModifierPressed(NSEvent eventArgs, RawInputModifiers modifiers, PhysicalKey physicalKey)
+    {
+        return physicalKey switch
+        {
+            PhysicalKey.ShiftLeft or PhysicalKey.ShiftRight => modifiers.HasFlag(RawInputModifiers.Shift),
+            PhysicalKey.ControlLeft or PhysicalKey.ControlRight => modifiers.HasFlag(RawInputModifiers.Control),
+            PhysicalKey.AltLeft or PhysicalKey.AltRight => modifiers.HasFlag(RawInputModifiers.Alt),
+            PhysicalKey.MetaLeft or PhysicalKey.MetaRight => modifiers.HasFlag(RawInputModifiers.Meta),
+            PhysicalKey.CapsLock => eventArgs.ModifierFlags.HasFlag(NSEventModifierMask.AlphaShiftKeyMask),
+            _ => false
+        };
     }
 
     private sealed class MacOSFramebufferRenderTarget(MacOSTopLevelImpl topLevel) : IFramebufferRenderTarget
@@ -469,6 +659,94 @@ internal sealed class MacOSView : NSView
     public override bool IsFlipped => true;
 
     public override bool AcceptsFirstResponder() => true;
+
+    public override void MouseMoved(NSEvent theEvent)
+    {
+        base.MouseMoved(theEvent);
+        _topLevel.HandlePointerEvent(theEvent, RawPointerEventType.Move);
+    }
+
+    public override void MouseDown(NSEvent theEvent)
+    {
+        base.MouseDown(theEvent);
+        _topLevel.HandlePointerEvent(theEvent, RawPointerEventType.LeftButtonDown);
+    }
+
+    public override void MouseUp(NSEvent theEvent)
+    {
+        base.MouseUp(theEvent);
+        _topLevel.HandlePointerEvent(theEvent, RawPointerEventType.LeftButtonUp);
+    }
+
+    public override void MouseDragged(NSEvent theEvent)
+    {
+        base.MouseDragged(theEvent);
+        _topLevel.HandlePointerEvent(theEvent, RawPointerEventType.Move);
+    }
+
+    public override void RightMouseDown(NSEvent theEvent)
+    {
+        base.RightMouseDown(theEvent);
+        _topLevel.HandlePointerEvent(theEvent, RawPointerEventType.RightButtonDown);
+    }
+
+    public override void RightMouseUp(NSEvent theEvent)
+    {
+        base.RightMouseUp(theEvent);
+        _topLevel.HandlePointerEvent(theEvent, RawPointerEventType.RightButtonUp);
+    }
+
+    public override void RightMouseDragged(NSEvent theEvent)
+    {
+        base.RightMouseDragged(theEvent);
+        _topLevel.HandlePointerEvent(theEvent, RawPointerEventType.Move);
+    }
+
+    public override void OtherMouseDown(NSEvent theEvent)
+    {
+        base.OtherMouseDown(theEvent);
+        _topLevel.HandlePointerEvent(theEvent, RawPointerEventType.MiddleButtonDown);
+    }
+
+    public override void OtherMouseUp(NSEvent theEvent)
+    {
+        base.OtherMouseUp(theEvent);
+        _topLevel.HandlePointerEvent(theEvent, RawPointerEventType.MiddleButtonUp);
+    }
+
+    public override void OtherMouseDragged(NSEvent theEvent)
+    {
+        base.OtherMouseDragged(theEvent);
+        _topLevel.HandlePointerEvent(theEvent, RawPointerEventType.Move);
+    }
+
+    public override void MouseExited(NSEvent theEvent)
+    {
+        base.MouseExited(theEvent);
+        _topLevel.HandlePointerLeave(theEvent);
+    }
+
+    public override void ScrollWheel(NSEvent theEvent)
+    {
+        base.ScrollWheel(theEvent);
+        _topLevel.HandleMouseWheel(theEvent);
+    }
+
+    public override void KeyDown(NSEvent theEvent)
+    {
+        _topLevel.HandleKeyEvent(theEvent, RawKeyEventType.KeyDown);
+    }
+
+    public override void KeyUp(NSEvent theEvent)
+    {
+        _topLevel.HandleKeyEvent(theEvent, RawKeyEventType.KeyUp);
+    }
+
+    public override void FlagsChanged(NSEvent theEvent)
+    {
+        base.FlagsChanged(theEvent);
+        _topLevel.HandleFlagsChanged(theEvent);
+    }
 
     public override void DrawRect(CGRect dirtyRect)
     {

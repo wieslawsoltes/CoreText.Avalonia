@@ -54,6 +54,11 @@ internal sealed class MacOSScreenImpl : IScreenImpl
 
     public Task<bool> RequestScreenDetails() => Task.FromResult(true);
 
+    internal void NotifyChanged()
+    {
+        Changed?.Invoke();
+    }
+
     private static int IntersectionArea(PixelRect left, PixelRect right)
     {
         var x1 = Math.Max(left.X, right.X);

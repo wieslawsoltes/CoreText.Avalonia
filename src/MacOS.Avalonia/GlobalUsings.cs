@@ -12,6 +12,7 @@ global using ObjCRuntime;
 global using Avalonia;
 global using Avalonia.Controls;
 global using Avalonia.Controls.ApplicationLifetimes;
+global using Avalonia.Controls.Primitives.PopupPositioning;
 global using Avalonia.Controls.Platform;
 global using Avalonia.Input;
 global using Avalonia.Input.Platform;

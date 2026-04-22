@@ -9,6 +9,7 @@ public sealed class MacOSPlatform : IWindowingPlatform
     private static MacOSPlatform? s_instance;
     private readonly List<MacOSWindowImpl> _windows = new();
     private readonly object _windowsSync = new();
+    private NSObject? _screenParametersObserver;
 
     private MacOSPlatform(
         MacOSPlatformOptions options,
@@ -180,6 +181,10 @@ public sealed class MacOSPlatform : IWindowingPlatform
 
         Compositor = new Compositor(PlatformGraphics, true);
         AvaloniaLocator.CurrentMutable.Bind<Compositor>().ToConstant(Compositor);
+
+        _screenParametersObserver = NSNotificationCenter.DefaultCenter.AddObserver(
+            new NSString("NSApplicationDidChangeScreenParametersNotification"),
+            _ => Dispatcher.UIThread.Post(Screens.NotifyChanged, DispatcherPriority.Input));
 
         NativeApplication.FinishLaunching();
     }
