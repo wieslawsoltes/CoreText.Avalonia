@@ -9,9 +9,9 @@ public sealed class MacOSPlatform : IWindowingPlatform
     private static MacOSPlatform? s_instance;
     private readonly List<MacOSWindowImpl> _windows = new();
     private readonly object _windowsSync = new();
+    private NSObject? _screenParametersObserver;
     private MacOSMainMenuManager? _mainMenuManager;
     private MacOSDockMenuProvider? _dockMenuProvider;
-    private NSObject? _screenParametersObserver;
 
     private MacOSPlatform(
         MacOSPlatformOptions options,
@@ -44,9 +44,9 @@ public sealed class MacOSPlatform : IWindowingPlatform
 
     internal IPlatformGraphics? PlatformGraphics { get; }
 
-    internal static Compositor Compositor { get; private set; } = null!;
     internal MacOSMainMenuManager MainMenuManager => _mainMenuManager ?? throw new InvalidOperationException("Main menu manager is not initialized.");
 
+    internal static Compositor Compositor { get; private set; } = null!;
 
     public static MacOSPlatform Initialize(MacOSPlatformOptions options)
     {
@@ -81,9 +81,9 @@ public sealed class MacOSPlatform : IWindowingPlatform
 
     public IWindowImpl CreateWindow() => new MacOSWindowImpl(this, Options);
 
-    public IWindowImpl CreateEmbeddableWindow() => throw new PlatformNotSupportedException();
+    public IWindowImpl CreateEmbeddableWindow() => new MacOSEmbeddableWindowImpl(this);
 
-    public ITopLevelImpl CreateEmbeddableTopLevel() => throw new PlatformNotSupportedException();
+    public ITopLevelImpl CreateEmbeddableTopLevel() => new MacOSEmbeddableWindowImpl(this);
 
     public ITrayIconImpl? CreateTrayIcon() => new MacOSTrayIconImpl();
 
@@ -127,12 +127,12 @@ public sealed class MacOSPlatform : IWindowingPlatform
 
         var clipboardImpl = new MacOSClipboardImpl();
         var clipboard = new MacOSClipboard(clipboardImpl);
-        var hotkeys = new PlatformHotkeyConfiguration(KeyModifiers.Meta, wholeWordTextActionModifiers: KeyModifiers.Alt);
-        hotkeys.MoveCursorToTheStartOfLine.Add(new KeyGesture(Key.Left, hotkeys.CommandModifiers));
-        hotkeys.MoveCursorToTheStartOfLineWithSelection.Add(new KeyGesture(Key.Left, hotkeys.CommandModifiers | hotkeys.SelectionModifiers));
         var applicationCommands = new MacOSNativeApplicationCommands(NativeApplication);
         _mainMenuManager = new MacOSMainMenuManager(NativeApplication, Options, applicationCommands);
         _dockMenuProvider = new MacOSDockMenuProvider(Options);
+        var hotkeys = new PlatformHotkeyConfiguration(KeyModifiers.Meta, wholeWordTextActionModifiers: KeyModifiers.Alt);
+        hotkeys.MoveCursorToTheStartOfLine.Add(new KeyGesture(Key.Left, hotkeys.CommandModifiers));
+        hotkeys.MoveCursorToTheStartOfLineWithSelection.Add(new KeyGesture(Key.Left, hotkeys.CommandModifiers | hotkeys.SelectionModifiers));
         hotkeys.MoveCursorToTheEndOfLine.Add(new KeyGesture(Key.Right, hotkeys.CommandModifiers));
         hotkeys.MoveCursorToTheEndOfLineWithSelection.Add(new KeyGesture(Key.Right, hotkeys.CommandModifiers | hotkeys.SelectionModifiers));
         var keyGestureFormatInfo = new KeyGestureFormatInfo(
@@ -166,8 +166,9 @@ public sealed class MacOSPlatform : IWindowingPlatform
             .Bind<IClipboardImpl>().ToConstant(clipboardImpl)
             .Bind<IClipboard>().ToConstant(clipboard)
             .Bind<ICursorFactory>().ToConstant(new MacOSCursorFactory())
-            .Bind<IScreenImpl>().ToConstant(Screens)
+            .Bind<IPlatformDragSource>().ToSingleton<MacOSDragSource>()
             .Bind<IMountedVolumeInfoProvider>().ToConstant(new MacOSMountedVolumeInfoProvider())
+            .Bind<IScreenImpl>().ToConstant(Screens)
             .Bind<IPlatformSettings>().ToConstant(new MacOSPlatformSettings())
             .Bind<IPlatformIconLoader>().ToSingleton<MacOSIconLoader>()
             .Bind<IKeyboardDevice>().ToConstant(KeyboardDevice)

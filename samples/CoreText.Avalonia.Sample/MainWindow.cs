@@ -6,6 +6,8 @@ namespace CoreText.Avalonia.Sample;
 
 internal sealed class MainWindow : Window
 {
+    private readonly DragDropLabControl _dragDropLab;
+
     public MainWindow(CoreTextSurfaceMode surfaceMode)
     {
         Title = $"CoreText.Avalonia Render Gallery ({surfaceMode})";
@@ -16,7 +18,12 @@ internal sealed class MainWindow : Window
         Background = new SolidColorBrush(Color.Parse("#F8FBFD"));
 
         var sampleBitmap = SampleBitmapFactory.Create();
-        Closed += (_, _) => sampleBitmap.Dispose();
+        _dragDropLab = new DragDropLabControl();
+        Closed += (_, _) =>
+        {
+            sampleBitmap.Dispose();
+            _dragDropLab.Dispose();
+        };
 
         Content = new Border
         {
@@ -26,15 +33,16 @@ internal sealed class MainWindow : Window
             Background = Brushes.White,
             BorderBrush = new SolidColorBrush(Color.Parse("#D7E3ED")),
             BorderThickness = new Thickness(1),
-            Child = CreateTabs(surfaceMode, sampleBitmap)
+            Child = CreateTabs(surfaceMode, sampleBitmap, _dragDropLab)
         };
     }
 
-    private static Control CreateTabs(CoreTextSurfaceMode surfaceMode, WriteableBitmap sampleBitmap)
+    private static Control CreateTabs(CoreTextSurfaceMode surfaceMode, WriteableBitmap sampleBitmap, DragDropLabControl dragDropLab)
     {
         var rendering = CreateRenderingTab(sampleBitmap);
         var textLayout = CreateTextTab(sampleBitmap);
         var controls = CreateControlsTab(surfaceMode);
+        var dragDrop = CreateDragDropTab(dragDropLab);
 
         var contentHost = new Border
         {
@@ -52,7 +60,8 @@ internal sealed class MainWindow : Window
         {
             (Button: CreateTabButton("Rendering"), Content: rendering),
             (Button: CreateTabButton("Text & Layout"), Content: textLayout),
-            (Button: CreateTabButton("Controls"), Content: controls)
+            (Button: CreateTabButton("Controls"), Content: controls),
+            (Button: CreateTabButton("Drag & Drop"), Content: dragDrop)
         };
 
         foreach (var tab in tabs)
@@ -235,6 +244,15 @@ internal sealed class MainWindow : Window
         layout.Children.Add(interactionCard);
 
         return layout;
+    }
+
+    private static Control CreateDragDropTab(DragDropLabControl dragDropLab)
+    {
+        return CreateCard(
+            "External drag-drop lab",
+            "Use this surface to validate Finder file drops, text drops from another app, text export to a text editor, and file export to Finder or the desktop.",
+            dragDropLab,
+            CreateBodyText("Recommended manual pass: drag the sample file tile into Finder, drag the text tile into TextEdit, then drop a Finder file and external text back into the target surface."));
     }
 
     private static Grid CreateTwoColumnGrid()

@@ -1,13 +1,17 @@
+using System.IO;
 using Avalonia.Controls;
+using Avalonia.Controls.Platform;
 using Avalonia.Controls.Primitives.PopupPositioning;
 
 namespace MacOS.Avalonia;
 
 internal class MacOSWindowImpl : MacOSTopLevelImpl, IWindowImpl
 {
+    private static readonly NSImage s_placeholderWindowImage = new();
     private readonly MacOSPlatformOptions _options;
     private readonly NSWindow _window;
     private readonly WindowDelegate _delegate;
+    private readonly MacOSWindowMenuExporter _menuExporter;
     private readonly Timer _invalidateTimer;
     private bool _isVisible;
     private bool _canResize = true;
@@ -17,6 +21,8 @@ internal class MacOSWindowImpl : MacOSTopLevelImpl, IWindowImpl
     private WindowState _windowState = WindowState.Normal;
     private bool _extendClientArea;
     private double _extendClientAreaTitleBarHeight = -1;
+    private ResizeDragState? _resizeDrag;
+    private NSImage? _windowIconImage;
 
     public MacOSWindowImpl(MacOSPlatform platform, MacOSPlatformOptions options)
         : this(platform, options, CreateStandardWindow())
@@ -33,6 +39,7 @@ internal class MacOSWindowImpl : MacOSTopLevelImpl, IWindowImpl
         _window.ContentView = view;
         _delegate = new WindowDelegate(this);
         _window.Delegate = _delegate;
+        _menuExporter = new MacOSWindowMenuExporter(platform.MainMenuManager, _window);
         _window.ReleasedWhenClosed = false;
         _window.AcceptsMouseMovedEvents = true;
         _invalidateTimer = new Timer(_ => Dispatcher.UIThread.Post(Invalidate), null, Timeout.Infinite, Timeout.Infinite);
@@ -41,6 +48,27 @@ internal class MacOSWindowImpl : MacOSTopLevelImpl, IWindowImpl
     }
 
     protected override NSWindow? NativeWindow => _window;
+
+    protected override bool TryHandlePlatformPointerEvent(NSEvent eventArgs, RawPointerEventType eventType)
+    {
+        if (_resizeDrag is not { } resizeDrag)
+        {
+            return false;
+        }
+
+        switch (eventType)
+        {
+            case RawPointerEventType.Move:
+                ApplyResizeDrag(resizeDrag, GetClientPoint(eventArgs));
+                return true;
+            case RawPointerEventType.LeftButtonUp:
+                ApplyResizeDrag(resizeDrag, GetClientPoint(eventArgs));
+                _resizeDrag = null;
+                return true;
+            default:
+                return false;
+        }
+    }
 
     public Size? FrameSize => new Size(_window.Frame.Width, _window.Frame.Height);
 
@@ -136,10 +164,26 @@ internal class MacOSWindowImpl : MacOSTopLevelImpl, IWindowImpl
 
     public void SetIcon(IWindowIconImpl? icon)
     {
+        var image = CreateImage(icon)
+            ?? Platform.NativeApplication.ApplicationIconImage
+            ?? s_placeholderWindowImage;
+        _window.MiniWindowImage = image;
+        Platform.NativeApplication.ApplicationIconImage = image;
+        Platform.NativeApplication.DockTile.Display();
+        _window.DockTile.Display();
+
+        if (!ReferenceEquals(_windowIconImage, image))
+        {
+            _windowIconImage?.Dispose();
+            _windowIconImage = ReferenceEquals(image, s_placeholderWindowImage) ? null : image;
+        }
     }
 
     public void ShowTaskbarIcon(bool value)
     {
+        Platform.NativeApplication.ActivationPolicy = value
+            ? NSApplicationActivationPolicy.Regular
+            : NSApplicationActivationPolicy.Accessory;
     }
 
     public void CanResize(bool value)
@@ -187,7 +231,26 @@ internal class MacOSWindowImpl : MacOSTopLevelImpl, IWindowImpl
 
     public void BeginResizeDrag(WindowEdge edge, PointerPressedEventArgs e)
     {
-        BeginMoveDrag(e);
+        if (!_canResize)
+        {
+            return;
+        }
+
+        e.Pointer.Capture(null);
+
+        var currentEvent = NSApplication.SharedApplication.CurrentEvent;
+        if (currentEvent is null)
+        {
+            return;
+        }
+
+        _resizeDrag = new ResizeDragState(
+            edge,
+            _window.Frame,
+            ClientSize,
+            GetClientPoint(currentEvent),
+            new Size(_window.ContentMinSize.Width, _window.ContentMinSize.Height),
+            new Size(_window.ContentMaxSize.Width, _window.ContentMaxSize.Height));
     }
 
     public void Resize(Size clientSize, WindowResizeReason reason = WindowResizeReason.Application)
@@ -258,19 +321,42 @@ internal class MacOSWindowImpl : MacOSTopLevelImpl, IWindowImpl
 
     public override void Dispose()
     {
+        _resizeDrag = null;
         _invalidateTimer.Dispose();
+        _menuExporter.Dispose();
+        _window.MiniWindowImage = s_placeholderWindowImage;
+        if (ReferenceEquals(Platform.NativeApplication.ApplicationIconImage, _windowIconImage))
+        {
+            Platform.NativeApplication.ApplicationIconImage = s_placeholderWindowImage;
+            Platform.NativeApplication.DockTile.Display();
+        }
+
+        _windowIconImage?.Dispose();
+        _windowIconImage = null;
         Platform.UnregisterWindow(this);
         _window.Close();
         base.Dispose();
     }
 
+    public override object? TryGetFeature(Type featureType)
+    {
+        if (featureType == typeof(ITopLevelNativeMenuExporter))
+        {
+            return _menuExporter;
+        }
+
+        return base.TryGetFeature(featureType);
+    }
+
     internal void HandleActivated()
     {
+        _menuExporter.HandleActivated();
         Activated?.Invoke();
     }
 
     internal void HandleDeactivated()
     {
+        _menuExporter.HandleDeactivated();
         Deactivated?.Invoke();
         NotifyLostFocus();
     }
@@ -287,9 +373,22 @@ internal class MacOSWindowImpl : MacOSTopLevelImpl, IWindowImpl
 
     internal void HandleClosed()
     {
+        _resizeDrag = null;
         _isVisible = false;
         _invalidateTimer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         NotifyClosed();
+    }
+
+    private void ApplyResizeDrag(ResizeDragState resizeDrag, Point currentPoint)
+    {
+        var frame = MacOSWindowResizeHelper.CalculateFrame(
+            resizeDrag.InitialFrame,
+            resizeDrag.InitialClientSize,
+            resizeDrag.MinClientSize,
+            resizeDrag.MaxClientSize,
+            resizeDrag.Edge,
+            currentPoint - resizeDrag.InitialPointer);
+        _window.SetFrame(frame, true);
     }
 
     internal void HandleWindowStateChanged(WindowState state)
@@ -317,6 +416,25 @@ internal class MacOSWindowImpl : MacOSTopLevelImpl, IWindowImpl
         _window.StyleMask = style;
     }
 
+    private static NSImage? CreateImage(IWindowIconImpl? icon)
+    {
+        if (icon is null)
+        {
+            return null;
+        }
+
+        using var memoryStream = new MemoryStream();
+        icon.Save(memoryStream);
+        memoryStream.Position = 0;
+        using var data = NSData.FromStream(memoryStream);
+        if (data is null)
+        {
+            return null;
+        }
+
+        return new NSImage(data);
+    }
+
     private static NSWindow CreateStandardWindow()
     {
         return new NSWindow(
@@ -325,6 +443,14 @@ internal class MacOSWindowImpl : MacOSTopLevelImpl, IWindowImpl
             NSBackingStore.Buffered,
             false);
     }
+
+    private readonly record struct ResizeDragState(
+        WindowEdge Edge,
+        CGRect InitialFrame,
+        Size InitialClientSize,
+        Point InitialPointer,
+        Size MinClientSize,
+        Size MaxClientSize);
 
     private sealed class WindowDelegate(MacOSWindowImpl owner) : NSWindowDelegate
     {
