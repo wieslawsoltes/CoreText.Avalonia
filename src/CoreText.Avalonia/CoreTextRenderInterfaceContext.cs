@@ -11,6 +11,7 @@ internal sealed class CoreTextRenderInterfaceContext : IPlatformRenderInterfaceC
     private readonly CoreTextCoreImageContext _effectsContext;
     private readonly PixelSize _maxOffscreenRenderTargetPixelSize;
     private readonly IReadOnlyDictionary<Type, object> _publicFeatures;
+    private readonly CoreTextExternalObjectsFeature? _externalObjectsFeature;
 
     public CoreTextRenderInterfaceContext(CoreTextPlatformOptions options, IMetalDevice? metalDevice)
     {
@@ -20,12 +21,13 @@ internal sealed class CoreTextRenderInterfaceContext : IPlatformRenderInterfaceC
             ? CoreTextCoreImageContext.SharedSoftware
             : CoreTextCoreImageContext.ForMetalDevice(metalDevice);
         _maxOffscreenRenderTargetPixelSize = _effectsContext.MaxOutputPixelSize;
+        _externalObjectsFeature = metalDevice is null ? null : new CoreTextExternalObjectsFeature(metalDevice);
 
         var features = new Dictionary<Type, object>();
-        if (_metalDevice is not null)
+        if (_externalObjectsFeature is not null)
         {
-            TryAddFeature<IExternalObjectsHandleWrapRenderInterfaceContextFeature>(features);
-            TryAddFeature<IMetalExternalObjectsFeature>(features);
+            features[typeof(IExternalObjectsRenderInterfaceContextFeature)] = _externalObjectsFeature;
+            features[typeof(IExternalObjectsHandleWrapRenderInterfaceContextFeature)] = _externalObjectsFeature;
         }
 
         _publicFeatures = features;
@@ -87,13 +89,5 @@ internal sealed class CoreTextRenderInterfaceContext : IPlatformRenderInterfaceC
 
     public void Dispose()
     {
-    }
-
-    private void TryAddFeature<TFeature>(Dictionary<Type, object> features) where TFeature : class
-    {
-        if (_metalDevice?.TryGetFeature(typeof(TFeature)) is TFeature feature)
-        {
-            features[typeof(TFeature)] = feature;
-        }
     }
 }
