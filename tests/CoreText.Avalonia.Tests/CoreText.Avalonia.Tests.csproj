@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\CoreText.Avalonia\CoreText.Avalonia.csproj" />
+    <ProjectReference Include="..\..\src\MacOS.Avalonia\MacOS.Avalonia.csproj" />
   </ItemGroup>
 
   <ItemGroup>

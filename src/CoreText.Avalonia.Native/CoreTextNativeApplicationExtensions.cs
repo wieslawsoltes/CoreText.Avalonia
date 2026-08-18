@@ -1,4 +1,5 @@
 using CoreText.Avalonia;
+using MacOS.Avalonia;
 
 namespace Avalonia;
 
@@ -7,10 +8,9 @@ public static class CoreTextNativeApplicationExtensions
     public static AppBuilder UseCoreTextNative(
         this AppBuilder builder,
         CoreTextPlatformOptions? rendererOptions = null,
-        AvaloniaNativePlatformOptions? nativeOptions = null)
+        MacOSPlatformOptions? nativeOptions = null)
     {
-        builder = builder.With(nativeOptions ?? new AvaloniaNativePlatformOptions());
-        builder = builder.UseAvaloniaNative();
+        builder = builder.UseMacOS(nativeOptions);
         builder = builder.UseCoreText(rendererOptions);
         return builder;
     }

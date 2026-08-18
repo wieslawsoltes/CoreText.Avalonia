@@ -25,7 +25,7 @@ internal sealed class App : Application
 
     public static AppBuilder BuildAvaloniaApp(
         CoreTextPlatformOptions rendererOptions,
-        AvaloniaNativePlatformOptions nativeOptions)
+        MacOS.Avalonia.MacOSPlatformOptions nativeOptions)
     {
         return AppBuilder.Configure<App>()
             .UseCoreTextNative(rendererOptions, nativeOptions)

@@ -13,10 +13,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CoreText.Avalonia\CoreText.Avalonia.csproj" />
+    <ProjectReference Include="..\MacOS.Avalonia\MacOS.Avalonia.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Avalonia" />
-    <PackageReference Include="Avalonia.Native" />
   </ItemGroup>
 </Project>

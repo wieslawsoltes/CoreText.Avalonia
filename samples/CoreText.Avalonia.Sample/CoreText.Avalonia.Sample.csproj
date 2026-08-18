@@ -16,7 +16,6 @@
   <ItemGroup>
     <PackageReference Include="Avalonia" />
     <PackageReference Include="Avalonia.Fonts.Inter" />
-    <PackageReference Include="Avalonia.Native" />
     <PackageReference Include="Avalonia.Themes.Fluent" />
   </ItemGroup>
 </Project>

@@ -5,6 +5,7 @@
   <Folder Name="/src/">
     <Project Path="src/CoreText.Avalonia.Native/CoreText.Avalonia.Native.csproj" />
     <Project Path="src/CoreText.Avalonia/CoreText.Avalonia.csproj" />
+    <Project Path="src/MacOS.Avalonia/MacOS.Avalonia.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/CoreText.Avalonia.Tests/CoreText.Avalonia.Tests.csproj" />
